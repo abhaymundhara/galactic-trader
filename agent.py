@@ -169,6 +169,60 @@ def current_equity(mark_price_fallback: float = 0.0) -> float:
     return state["cash"] + long_value + short_upnl
 
 
+def local_positions_value(mark_price_fallback: float = 0.0) -> float:
+    """Local mark-to-market positions value (long value + short unrealized P&L)."""
+    long_value = sum(
+        p.get("quantity", 0) * state["last_prices"].get(sym, p.get("last_price", p.get("avg_cost", mark_price_fallback)))
+        for sym, p in state["positions"].items()
+        if p.get("quantity", 0) > 0
+    )
+    short_upnl = sum(
+        (p.get("avg_cost", 0) - state["last_prices"].get(sym, p.get("last_price", p.get("avg_cost", 0)))) * p.get("quantity", 0)
+        for sym, p in state["short_positions"].items()
+        if p.get("quantity", 0) > 0
+    )
+    return float(long_value + short_upnl)
+
+
+def _account_sync_fresh(max_age_seconds: int) -> bool:
+    raw_ts = str(state.get("last_account_sync", "") or "").strip()
+    if not raw_ts:
+        return False
+    try:
+        ts = datetime.fromisoformat(raw_ts)
+    except Exception:
+        return False
+    age = (datetime.utcnow() - ts).total_seconds()
+    return age >= 0 and age <= max_age_seconds
+
+
+def effective_portfolio_values(max_account_age_seconds: int = 120) -> tuple[float, float, float, str]:
+    """
+    Return (cash, total_value, positions_value, source).
+    Prefer fresh broker account values; fallback to local computed values.
+    """
+    local_cash = float(state.get("cash", 0.0) or 0.0)
+    local_pos = local_positions_value()
+    local_total = local_cash + local_pos
+
+    broker_cash = float(state.get("broker_cash", 0.0) or 0.0)
+    broker_total = float(
+        state.get("broker_portfolio_value", 0.0)
+        or state.get("broker_equity", 0.0)
+        or 0.0
+    )
+    if (
+        broker_total > 0
+        and _account_sync_fresh(max_account_age_seconds)
+        and math.isfinite(broker_cash)
+        and math.isfinite(broker_total)
+    ):
+        broker_positions = broker_total - broker_cash
+        return broker_cash, broker_total, broker_positions, "broker"
+
+    return local_cash, local_total, local_pos, "local"
+
+
 def compute_open_risk() -> float:
     """Approximate open risk to stop-loss across all positions (long + short)."""
     risk = 0.0
@@ -388,6 +442,11 @@ STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 # Shared state (read by dashboard)
 state = {
     "cash": STARTING_CAP,
+    "broker_cash": STARTING_CAP,
+    "broker_equity": STARTING_CAP,
+    "broker_portfolio_value": STARTING_CAP,
+    "last_account_sync": "",
+    "account_sync_error": "",
     "positions": {},  # symbol -> {quantity, avg_cost, last_price, stop_loss, take_profit}
     "last_prices": {},
     "last_decision": {},
@@ -564,9 +623,19 @@ async def fetch_account():
         r = await client.get(f"{ALPACA_BASE}/account", headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json()
-            state["cash"] = float(data.get("cash", state["cash"]))
+            cash = float(data.get("cash", state.get("cash", 0.0)) or state.get("cash", 0.0))
+            equity = float(data.get("equity", data.get("portfolio_value", cash)) or cash)
+            portfolio_value = float(data.get("portfolio_value", equity) or equity)
+            state["cash"] = cash
+            state["broker_cash"] = cash
+            state["broker_equity"] = equity
+            state["broker_portfolio_value"] = portfolio_value
+            state["last_account_sync"] = datetime.utcnow().isoformat()
+            state["account_sync_error"] = ""
         else:
-            print(f"Account fetch failed: {r.status_code} {r.text}")
+            err = f"{r.status_code} {r.text[:200]}"
+            state["account_sync_error"] = err
+            print(f"Account fetch failed: {err}")
 
 
 async def fetch_open_positions():
@@ -1522,7 +1591,15 @@ async def run_agent():
             await analyse_symbol(symbol)
             await asyncio.sleep(1)
 
-        snapshot = await db.record_snapshot(state["cash"], state["positions"], state["last_prices"])
+        snap_cash, snap_total, snap_positions, eq_source = effective_portfolio_values()
+        state["equity_source"] = eq_source
+        snapshot = await db.record_snapshot(
+            snap_cash,
+            state["positions"],
+            state["last_prices"],
+            total_value_override=snap_total,
+            positions_value_override=snap_positions,
+        )
 
         # ── Metrics & circuit breaker update ────────────────────────────────
         eq = float(snapshot.get("total_value", current_equity()))

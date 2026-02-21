@@ -105,7 +105,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     if p.get("quantity", 0) > 0
                 ]
 
-                positions_value = sum(
+                local_positions_value = sum(
                     _safe_num(p.get("quantity", 0), 0.0)
                     * _safe_num(agent.state["last_prices"].get(p["symbol"], p.get("last_price", 0)), 0.0)
                     for p in portfolio
@@ -118,13 +118,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     * _safe_num(p.get("quantity", 0), 0.0)
                     for p in portfolio
                 )
-                cash = _safe_num(agent.state.get("cash", 0), 0.0)
-                total_value = cash + positions_value
+                cash, total_value, positions_value, equity_source = agent.effective_portfolio_values()
                 payload = {
                     "type": "state",
                     "cash": round(cash, 2),
                     "total_value": round(total_value, 2),
                     "positions_value": round(positions_value, 2),
+                    "positions_value_local": round(local_positions_value, 2),
                     "unrealized_pnl": round(unrealized_pnl, 2),
                     "status": str(agent.state.get("status", "idle") or "idle"),
                     "week": int(agent.state.get("week", 1) or 1),
@@ -132,8 +132,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     "positions": agent.state.get("positions", {}) or {},
                     "last_prices": agent.state.get("last_prices", {}) or {},
                     "regime": {sym: dec.get("regime", "range") for sym, dec in (agent.state.get("last_decision", {}) or {}).items()},
-                    "drawdown": round(_rm.circuit_breaker.current_drawdown(total_value) * 100, 2),
+                    "drawdown": round(agent._rm.circuit_breaker.current_drawdown(total_value) * 100, 2),
                     "circuit_halt": bool(agent.state.get("halt_new_entries", False)),
+                    "equity_source": equity_source,
+                    "last_account_sync": agent.state.get("last_account_sync", ""),
+                    "account_sync_error": agent.state.get("account_sync_error", ""),
                 }
                 await websocket.send_json(_json_safe(payload))
             except Exception as ex:
@@ -226,11 +229,17 @@ async def api_portfolio():
 
 @app.get("/api/status")
 async def api_status():
+    cash, total_value, positions_value, equity_source = agent.effective_portfolio_values()
     return {
         "running": agent.state["running"],
         "status": agent.state["status"],
         "week": agent.state["week"],
-        "cash": agent.state["cash"],
+        "cash": cash,
+        "total_value": total_value,
+        "positions_value": positions_value,
+        "equity_source": equity_source,
+        "last_account_sync": agent.state.get("last_account_sync", ""),
+        "account_sync_error": agent.state.get("account_sync_error", ""),
         "symbols": agent.SYMBOLS,
         "model": agent.OLLAMA_MODEL,
     }

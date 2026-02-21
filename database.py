@@ -129,15 +129,21 @@ async def record_decision(symbol, action, confidence, reasoning, indicators):
         await db.commit()
 
 
-async def record_snapshot(cash, positions, live_prices=None):
+async def record_snapshot(cash, positions, live_prices=None, total_value_override=None, positions_value_override=None):
     """Save a portfolio snapshot for P&L chart."""
     async with aiosqlite.connect(DB_PATH) as db:
         live_prices = live_prices or {}
-        positions_value = sum(
-            p["quantity"] * live_prices.get(sym, p["last_price"])
-            for sym, p in positions.items()
-        )
-        total_value = cash + positions_value
+        if positions_value_override is None:
+            positions_value = sum(
+                p["quantity"] * live_prices.get(sym, p["last_price"])
+                for sym, p in positions.items()
+            )
+        else:
+            positions_value = float(positions_value_override)
+        if total_value_override is None:
+            total_value = cash + positions_value
+        else:
+            total_value = float(total_value_override)
         # Calculate total P&L vs last snapshot
         prev = await (await db.execute(
             "SELECT total_value FROM snapshots ORDER BY id DESC LIMIT 1"
