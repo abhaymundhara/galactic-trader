@@ -21,7 +21,8 @@ ALPACA_BASE   = "https://paper-api.alpaca.markets/v2"
 DATA_BASE     = "https://data.alpaca.markets/v2"
 
 OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
-SYMBOLS       = os.getenv("SYMBOLS", "AAPL,MSFT,NVDA,TSLA,AMZN").split(",")
+# BTC/USD and ETH/USD trade 24/7 on Alpaca; GLD is a stock ETF (market hours only)
+SYMBOLS       = os.getenv("SYMBOLS", "BTC/USD,ETH/USD,GLD").split(",")
 MAX_POS       = float(os.getenv("MAX_POSITION_SIZE", "0.10"))
 STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 
@@ -45,21 +46,42 @@ headers = {
     "content-type": "application/json",
 }
 
+CRYPTO_SYMBOLS = {"BTC/USD", "ETH/USD", "BTC/USDT", "ETH/USDT"}
+
+
+def is_crypto(symbol: str) -> bool:
+    return "/" in symbol or symbol in CRYPTO_SYMBOLS
+
 
 async def is_market_open() -> bool:
-    """Check Alpaca clock — avoid wasting LLM calls outside market hours."""
+    """
+    Crypto is 24/7 — always open.
+    For stock/ETF symbols, check Alpaca clock.
+    Returns True if ANY symbol needs to run.
+    """
+    has_stocks = any(not is_crypto(s) for s in SYMBOLS)
+    has_crypto = any(is_crypto(s) for s in SYMBOLS)
+
+    if not has_stocks:
+        state["market_open"] = True
+        return True
+
     if not ALPACA_KEY:
-        return True  # simulation mode: always "open"
+        state["market_open"] = True
+        return True
+
     try:
         async with httpx.AsyncClient() as client:
             r = await client.get(f"{ALPACA_BASE}/clock", headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json()
-            state["market_open"] = data.get("is_open", False)
+            stock_open = data.get("is_open", False)
+            # Run if market is open OR we have crypto (always tradeable)
+            state["market_open"] = stock_open or has_crypto
             return state["market_open"]
     except Exception as ex:
         print(f"Clock check failed: {ex}")
-    return False
+    return has_crypto  # fallback: still run for crypto
 
 
 async def fetch_account():
@@ -77,27 +99,38 @@ async def fetch_account():
 
 async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
     """
-    Fetch recent 1-min bars from Alpaca data feed.
-    Uses per-symbol endpoint: GET /v2/stocks/{symbol}/bars
-    Feed: iex (free tier) — no SIP subscription required.
+    Fetch recent 1-min bars.
+    - Crypto: GET /v2/crypto/us/{symbol}/bars (e.g. BTC/USD)
+    - Stocks/ETFs: GET /v2/stocks/{symbol}/bars  (IEX feed, free tier)
     """
     end   = datetime.utcnow()
     start = end - timedelta(hours=2)
-    params = {
-        "timeframe": "1Min",
-        "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "end":   end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "limit": limit,
-        "feed":  "iex",         # free tier feed
-        "sort":  "asc",
-    }
+    auth  = {"APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET}
+
+    if is_crypto(symbol):
+        # Alpaca crypto endpoint uses the symbol as-is (BTC/USD)
+        url = f"{DATA_BASE}/crypto/us/{symbol}/bars"
+        params = {
+            "timeframe": "1Min",
+            "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end":   end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "limit": limit,
+            "sort":  "asc",
+        }
+    else:
+        url = f"{DATA_BASE}/stocks/{symbol}/bars"
+        params = {
+            "timeframe": "1Min",
+            "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end":   end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "limit": limit,
+            "feed":  "iex",
+            "sort":  "asc",
+        }
+
     async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"{DATA_BASE}/stocks/{symbol}/bars",
-            headers={"APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET},
-            params=params,
-            timeout=15
-        )
+        r = await client.get(url, headers=auth, params=params, timeout=15)
+
     if r.status_code != 200:
         print(f"Bars fetch failed for {symbol}: {r.status_code} {r.text[:200]}")
         return pd.DataFrame()
@@ -109,20 +142,30 @@ async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
     return df
 
 
-async def submit_order(symbol: str, side: str, qty: int) -> dict | None:
+async def submit_order(symbol: str, side: str, qty: float) -> dict | None:
     """
     Submit a paper order via POST /v2/orders.
-    Uses market order (day) with integer qty.
+    - Crypto: fractional qty supported (float), time_in_force = gtc
+    - Stocks: integer qty, time_in_force = day
     """
     if not ALPACA_KEY:
         return None
-    payload = {
-        "symbol":        symbol,
-        "qty":           str(qty),
-        "side":          side,       # "buy" or "sell"
-        "type":          "market",
-        "time_in_force": "day",
-    }
+    if is_crypto(symbol):
+        payload = {
+            "symbol":        symbol,
+            "qty":           str(round(qty, 6)),
+            "side":          side,
+            "type":          "market",
+            "time_in_force": "gtc",   # crypto requires gtc, not day
+        }
+    else:
+        payload = {
+            "symbol":        symbol,
+            "qty":           str(int(qty)),
+            "side":          side,
+            "type":          "market",
+            "time_in_force": "day",
+        }
     async with httpx.AsyncClient() as client:
         r = await client.post(
             f"{ALPACA_BASE}/orders",
@@ -157,11 +200,12 @@ def compute_indicators(df: pd.DataFrame) -> dict:
 
 
 def build_prompt(symbol: str, indicators: dict, position: dict | None) -> str:
+    asset_type = "crypto" if is_crypto(symbol) else "stock/ETF"
     pos_text = "No open position." if not position else (
-        f"Holding {position['quantity']} shares @ avg ${position['avg_cost']:.2f}. "
+        f"Holding {position['quantity']} units @ avg ${position['avg_cost']:.4f}. "
         f"Current P&L: ${(indicators['price'] - position['avg_cost']) * position['quantity']:.2f}"
     )
-    return f"""You are a disciplined algo trader analysing {symbol} for a paper trading session.
+    return f"""You are a disciplined algo trader analysing {symbol} ({asset_type}) for a paper trading session.
 
 Current indicators:
 - Price: ${indicators['price']}
@@ -204,7 +248,7 @@ async def ask_llm(symbol: str, indicators: dict, position: dict | None) -> dict:
 
 
 async def execute_paper_trade(symbol: str, action: str, price: float, reason: str):
-    """Execute a paper trade — submits real order to Alpaca paper env, or simulates locally."""
+    """Execute a paper trade — submits real order to Alpaca paper env."""
     portfolio_value = state["cash"] + sum(
         p["quantity"] * state["last_prices"].get(s, p.get("avg_cost", price))
         for s, p in state["positions"].items()
@@ -213,34 +257,38 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
     max_spend = portfolio_value * MAX_POS
 
     if action == "buy":
-        quantity = int(max_spend / price)
-        if quantity < 1 or state["cash"] < price:
-            return
-        cost = quantity * price
-        if state["cash"] < cost:
-            quantity = int(state["cash"] / price)
-        if quantity < 1:
-            return
+        if is_crypto(symbol):
+            # Fractional crypto: buy in units (e.g. 0.001 BTC)
+            quantity = round(max_spend / price, 6)
+            if quantity <= 0 or state["cash"] < price * 0.001:
+                return
+        else:
+            quantity = int(max_spend / price)
+            if quantity < 1 or state["cash"] < price:
+                return
+            cost = quantity * price
+            if state["cash"] < cost:
+                quantity = int(state["cash"] / price)
+            if quantity < 1:
+                return
 
-        # Submit to Alpaca paper API (if keys configured)
         order = await submit_order(symbol, "buy", quantity)
         if ALPACA_KEY and not order:
-            return  # order rejected by Alpaca
+            return
 
-        # Update local state (Alpaca paper fills nearly instantly for market orders)
         state["cash"] -= quantity * price
         pos = state["positions"].get(symbol, {"quantity": 0, "avg_cost": price})
         new_qty = pos["quantity"] + quantity
         new_avg = (pos["quantity"] * pos.get("avg_cost", price) + quantity * price) / new_qty
         state["positions"][symbol] = {"quantity": new_qty, "avg_cost": new_avg, "last_price": price}
         await db.record_trade(symbol, "buy", quantity, price, reason)
-        print(f"🟢 BUY  {quantity}x {symbol} @ ${price:.2f} | {reason}")
+        print(f"🟢 BUY  {quantity} {symbol} @ ${price:.4f} | {reason}")
 
     elif action == "sell":
         pos = state["positions"].get(symbol)
-        if not pos or pos.get("quantity", 0) < 1:
+        if not pos or pos.get("quantity", 0) <= 0:
             return
-        quantity = int(pos["quantity"])
+        quantity = pos["quantity"]
 
         order = await submit_order(symbol, "sell", quantity)
         if ALPACA_KEY and not order:
@@ -250,14 +298,14 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         state["positions"][symbol]["quantity"] = 0
         state["positions"][symbol]["last_price"] = price
         await db.record_trade(symbol, "sell", quantity, price, reason)
-        print(f"🔴 SELL {quantity}x {symbol} @ ${price:.2f} | {reason}")
+        print(f"🔴 SELL {quantity} {symbol} @ ${price:.4f} | {reason}")
 
 
 async def analyse_symbol(symbol: str):
     """Full analysis → decision → optional execution for one symbol."""
     df = await fetch_bars(symbol)
     if df.empty:
-        print(f"⚠️  No bars for {symbol} (market may be closed or IEX has no data)")
+        print(f"⚠️  No bars for {symbol}")
         return
 
     indicators = compute_indicators(df)
@@ -300,15 +348,18 @@ async def run_agent():
 
     loop_count = 0
     while state["running"]:
-        open_market = await is_market_open()
-        if not open_market:
+        can_run = await is_market_open()
+        if not can_run:
             state["status"] = "market_closed"
-            print("💤 Market closed — sleeping 5 min")
+            print("💤 Stock market closed + no 24/7 assets — sleeping 5 min")
             await asyncio.sleep(300)
             continue
 
         state["status"] = "analysing"
         for symbol in SYMBOLS:
+            # Skip stock-market-hours-only symbols when market is closed
+            if not is_crypto(symbol) and not state.get("market_open"):
+                continue
             await analyse_symbol(symbol)
             await asyncio.sleep(1)
 
