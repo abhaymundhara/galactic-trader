@@ -130,6 +130,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     "week": int(agent.state.get("week", 1) or 1),
                     "last_decisions": agent.state.get("last_decision", {}) or {},
                     "positions": agent.state.get("positions", {}) or {},
+                    "last_prices": agent.state.get("last_prices", {}) or {},
+                    "regime": {sym: dec.get("regime", "range") for sym, dec in (agent.state.get("last_decision", {}) or {}).items()},
+                    "drawdown": round(_rm.circuit_breaker.current_drawdown(total_value) * 100, 2),
+                    "circuit_halt": bool(agent.state.get("halt_new_entries", False)),
                 }
                 await websocket.send_json(_json_safe(payload))
             except Exception as ex:
@@ -156,6 +160,45 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # ── REST endpoints ─────────────────────────────────────────────────────────────
+
+@app.get("/api/candles/{symbol:path}")
+async def api_candles(symbol: str, limit: int = 60, timeframe: str = "5Min"):
+    """Return recent OHLCV bars for a symbol (proxied from Alpaca Data API)."""
+    import httpx, os, urllib.parse
+    symbol = urllib.parse.unquote(symbol)
+    key    = os.getenv("ALPACA_API_KEY", "")
+    secret = os.getenv("ALPACA_SECRET_KEY", "")
+    headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret, "accept": "application/json"}
+
+    is_crypto = "/" in symbol or "USDT" in symbol.upper()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            if is_crypto:
+                sym_enc = urllib.parse.quote(symbol, safe="")
+                url = f"https://data.alpaca.markets/v1beta3/crypto/us/bars?symbols={sym_enc}&timeframe={timeframe}&limit={limit}&feed=us&sort=asc"
+                r = await client.get(url, headers=headers)
+                data = r.json()
+                bars = data.get("bars", {}).get(symbol, [])
+            else:
+                url = f"https://data.alpaca.markets/v2/stocks/{symbol}/bars?timeframe={timeframe}&limit={limit}&feed=iex&sort=asc"
+                r = await client.get(url, headers=headers)
+                data = r.json()
+                bars = data.get("bars", [])
+        # Normalise to {time, open, high, low, close, volume}
+        result = []
+        for b in bars:
+            result.append({
+                "time": b.get("t", ""),
+                "open":   round(float(b.get("o", 0)), 6),
+                "high":   round(float(b.get("h", 0)), 6),
+                "low":    round(float(b.get("l", 0)), 6),
+                "close":  round(float(b.get("c", 0)), 6),
+                "volume": float(b.get("v", 0)),
+            })
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
 
 @app.get("/api/trades")
 async def api_trades(limit: int = 50):
