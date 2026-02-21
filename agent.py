@@ -27,6 +27,33 @@ OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 # BTC/USD and ETH/USD trade 24/7 on Alpaca; GLD is a stock ETF (market hours only)
 SYMBOLS       = [s.strip() for s in os.getenv("SYMBOLS", "BTC/USD,ETH/USD,GLD,AAPL,NVDA,AMZN,MSFT").split(",") if s.strip()]
 MAX_POS       = float(os.getenv("MAX_POSITION_SIZE", "0.10"))
+
+# Alpaca regulatory fees (paper simulation — deducted to reflect real P&L)
+# Source: https://alpaca.markets/support/regulatory-fees
+# SEC fee: $0.0000278 per $1 principal (sells only)
+# TAF fee: $0.000166 per share (sells only), capped at $8.30
+# CAT fee: $0.0000265 per share (buys & sells, equities only)
+# Alpaca is commission-free (no per-trade commission)
+_SEC_RATE  = 0.0000278   # per $ of principal, sells only
+_TAF_RATE  = 0.000166    # per share, sells only, max $8.30
+_CAT_RATE  = 0.0000265   # per share, equities only (buys + sells)
+
+
+def calc_fees(symbol: str, action: str, quantity: float, price: float) -> float:
+    """Calculate Alpaca regulatory fees for a trade."""
+    principal = quantity * price
+    fees = 0.0
+    if not is_crypto(symbol):
+        # CAT fee applies to both sides for equities
+        fees += quantity * _CAT_RATE
+        if action == "sell":
+            # SEC fee (principal-based, sells only)
+            fees += principal * _SEC_RATE
+            # TAF fee (per share, sells only, capped)
+            fees += min(quantity * _TAF_RATE, 8.30)
+    # Round up to nearest penny (as Alpaca does)
+    import math
+    return math.ceil(fees * 100) / 100
 STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 
 # Shared state (read by dashboard)
@@ -421,7 +448,8 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         if ALPACA_KEY and not order:
             return
 
-        state["cash"] -= quantity * price
+        buy_fees = calc_fees(symbol, "buy", quantity, price)
+        state["cash"] -= quantity * price + buy_fees
         pos = state["positions"].get(symbol, {"quantity": 0, "avg_cost": price})
         new_qty = pos["quantity"] + quantity
         new_avg = (pos["quantity"] * pos.get("avg_cost", price) + quantity * price) / new_qty
@@ -440,10 +468,11 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
             reason,
             stop_loss=state["positions"][symbol]["stop_loss"],
             take_profit=state["positions"][symbol]["take_profit"],
+            fees=buy_fees,
         )
         sl = state["positions"][symbol]["stop_loss"]
         tp = state["positions"][symbol]["take_profit"]
-        print(f"🟢 BUY  {quantity} {symbol} @ ${price:.4f} | SL: ${sl:.4f} | TP: ${tp:.4f} | {reason}")
+        print(f"🟢 BUY  {quantity} {symbol} @ ${price:.4f} | SL: ${sl:.4f} | TP: ${tp:.4f} | fees: ${buy_fees:.4f} | {reason}")
 
     elif action == "sell":
         pos = state["positions"].get(symbol)
@@ -455,13 +484,14 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         if ALPACA_KEY and not order:
             return
 
-        state["cash"] += quantity * price
+        sell_fees = calc_fees(symbol, "sell", quantity, price)
+        state["cash"] += quantity * price - sell_fees
         state["positions"][symbol]["quantity"]   = 0
         state["positions"][symbol]["last_price"] = price
         state["positions"][symbol]["stop_loss"]  = 0.0
         state["positions"][symbol]["take_profit"] = 0.0
-        await db.record_trade(symbol, "sell", quantity, price, reason, stop_loss=0.0, take_profit=0.0)
-        print(f"🔴 SELL {quantity} {symbol} @ ${price:.4f} | {reason}")
+        await db.record_trade(symbol, "sell", quantity, price, reason, stop_loss=0.0, take_profit=0.0, fees=sell_fees)
+        print(f"🔴 SELL {quantity} {symbol} @ ${price:.4f} | fees: ${sell_fees:.4f} | {reason}")
 
 
 async def analyse_symbol(symbol: str):
