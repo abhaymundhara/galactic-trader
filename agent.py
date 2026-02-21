@@ -38,6 +38,7 @@ def _env_bool(key: str, default: bool = False) -> bool:
 ADD_ALL_FIVE = _env_bool("ADD_ALL_FIVE", False)
 IDLE_TIMEOUT_FIX = _env_bool("IDLE_TIMEOUT_FIX", False)
 CONTINUOUS_ANALYSIS = _env_bool("CONTINUOUS_ANALYSIS", False)
+ENABLE_SHORT = _env_bool("ENABLE_SHORT", True)   # short stocks on bearish signal; crypto not supported by Alpaca
 
 # Risk / filter controls
 ATR_SL_MULT = float(os.getenv("ATR_SL_MULT", "1.5"))
@@ -104,25 +105,64 @@ def sanitize_risk_levels(price: float, stop_loss: float, take_profit: float) -> 
     return round(sl, 4), round(tp, 4)
 
 
+def sanitize_short_risk_levels(price: float, stop_loss: float, take_profit: float) -> tuple[float, float]:
+    """For shorts: SL is ABOVE entry (cuts loss if price rises), TP is BELOW entry (profit target)."""
+    sl_default = round(price * 1.025, 4)   # 2.5% above entry
+    tp_default = round(price * 0.95,  4)   # 5% below entry
+
+    sl = float(stop_loss  or 0.0)
+    tp = float(take_profit or 0.0)
+
+    if sl <= 0 or sl <= price:
+        sl = sl_default
+    if tp <= 0 or tp >= price:
+        tp = tp_default
+
+    if sl <= price:
+        sl = sl_default
+    if tp >= price:
+        tp = tp_default
+    if tp >= sl:   # impossible ordering
+        sl = sl_default
+        tp = tp_default
+
+    return round(sl, 4), round(tp, 4)
+
+
 def current_equity(mark_price_fallback: float = 0.0) -> float:
-    return state["cash"] + sum(
+    long_value = sum(
         p.get("quantity", 0) * state["last_prices"].get(sym, p.get("last_price", p.get("avg_cost", mark_price_fallback)))
         for sym, p in state["positions"].items()
         if p.get("quantity", 0) > 0
     )
+    # Unrealised P&L on shorts: profit when current price < avg_cost.
+    short_upnl = sum(
+        (p.get("avg_cost", 0) - state["last_prices"].get(sym, p.get("last_price", p.get("avg_cost", 0)))) * p.get("quantity", 0)
+        for sym, p in state["short_positions"].items()
+        if p.get("quantity", 0) > 0
+    )
+    return state["cash"] + long_value + short_upnl
 
 
 def compute_open_risk() -> float:
-    """Approximate open risk to stop-loss across all positions."""
+    """Approximate open risk to stop-loss across all positions (long + short)."""
     risk = 0.0
     for pos in state["positions"].values():
         qty = float(pos.get("quantity", 0) or 0)
         if qty <= 0:
             continue
         avg = float(pos.get("avg_cost", 0) or 0)
-        sl = float(pos.get("stop_loss", 0) or 0)
+        sl  = float(pos.get("stop_loss", 0) or 0)
         if sl > 0 and avg > 0:
             risk += max(0.0, avg - sl) * qty
+    for pos in state["short_positions"].values():
+        qty = float(pos.get("quantity", 0) or 0)
+        if qty <= 0:
+            continue
+        avg = float(pos.get("avg_cost", 0) or 0)
+        sl  = float(pos.get("stop_loss", 0) or 0)
+        if sl > 0 and avg > 0:
+            risk += max(0.0, sl - avg) * qty   # short risk: distance from entry UP to SL
     return risk
 
 
@@ -172,6 +212,29 @@ def apply_trailing_stop(symbol: str, price: float):
         pos["stop_loss"] = new_sl
         print(f"📈 Trail SL {symbol}: ${sl:.4f} → ${new_sl:.4f}  (price ${price:.4f})")
 
+    # Short trailing stop — ratchet SL downward as price falls in our favour.
+    short_pos = state["short_positions"].get(symbol)
+    if short_pos and short_pos.get("quantity", 0) > 0:
+        s_avg = float(short_pos.get("avg_cost", 0) or 0)
+        s_sl  = float(short_pos.get("stop_loss",  0) or 0)
+        s_atr = float(
+            state["last_decision"].get(symbol, {}).get("indicators", {}).get("atr", 0) or 0
+        )
+        if s_avg > 0 and s_atr > 0 and price < s_avg:   # only trail when short is in profit
+            gain   = s_avg - price
+            new_sl = s_sl
+            # Step 1 — move SL to breakeven once down 1x ATR.
+            if gain >= s_atr and s_sl > s_avg:
+                new_sl = round(s_avg * 0.999, 4)   # entry − 0.1% buffer
+            # Step 2 — trail SL downward at ATR_SL_MULT × ATR above current price.
+            if gain >= 2 * s_atr:
+                trail = round(price + ATR_SL_MULT * s_atr, 4)
+                if trail < new_sl:
+                    new_sl = trail
+            if new_sl < s_sl:
+                short_pos["stop_loss"] = new_sl
+                print(f"📉 Trail SL (short) {symbol}: ${s_sl:.4f} → ${new_sl:.4f}  (price ${price:.4f})")
+
 
 def infer_regime(indicators: dict, higher_tf: dict | None) -> str:
     adx = float(indicators.get("adx", 0) or 0)
@@ -207,6 +270,36 @@ def buy_filters_ok(indicators: dict, higher_tf: dict | None) -> tuple[bool, str]
     if adx < 15:
         return False, f"ADX too low — no trend strength ({adx:.1f} < 15)"
     return True, "ok"
+
+
+def short_filters_ok(indicators: dict, higher_tf: dict | None) -> tuple[bool, str]:
+    """Mirror of buy_filters_ok for short entries — requires bearish confluence on all signals."""
+    price     = float(indicators.get("price", 0) or 0)
+    vwap      = float(indicators.get("vwap", 0) or 0)
+    vol_ratio = float(indicators.get("volume_ratio", 0) or 0)
+    h_cross   = (higher_tf or {}).get("ema_cross", "unknown")
+    rsi       = float(indicators.get("rsi", 50) or 50)
+    macd_val  = float(indicators.get("macd", 0) or 0)
+    macd_sig  = float(indicators.get("macd_signal", 0) or 0)
+    adx       = float(indicators.get("adx", 0) or 0)
+
+    if vwap > 0 and price > vwap:
+        return False, "price above VWAP (not bearish)"
+    if vol_ratio < MIN_VOLUME_RATIO:
+        return False, f"low volume ratio {vol_ratio:.2f}"
+    if h_cross != "bearish":
+        return False, "higher-timeframe trend not bearish"
+    if rsi > 65:
+        return False, f"RSI still elevated ({rsi:.1f} > 65) — wait for momentum to turn"
+    if rsi < 35:
+        return False, f"RSI oversold ({rsi:.1f} < 35) — too late to short, bounce risk"
+    if macd_val > macd_sig:
+        return False, f"MACD still bullish ({macd_val:.4f} > signal {macd_sig:.4f})"
+    if adx < 15:
+        return False, f"ADX too low — no trend strength ({adx:.1f} < 15)"
+    return True, "ok"
+
+
 STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 
 # Shared state (read by dashboard)
@@ -222,7 +315,8 @@ state = {
     "risk_day": datetime.utcnow().strftime("%Y-%m-%d"),
     "daily_start_equity": STARTING_CAP,
     "halt_new_entries": False,
-    "loss_streak": {},   # symbol -> consecutive closed losses; >=2 triggers cooldown
+    "loss_streak": {},        # symbol -> consecutive closed losses; >=2 triggers cooldown
+    "short_positions": {},   # symbol -> {quantity, avg_cost, last_price, stop_loss, take_profit}
 }
 
 # Auth headers for all Alpaca calls
@@ -327,8 +421,11 @@ async def fetch_open_positions():
         print(f"Positions fetch failed: {r.status_code} {r.text[:200]}")
         return
 
-    existing = state.get("positions", {})
-    synced: dict[str, dict] = {}
+    existing       = state.get("positions", {})
+    existing_short = state.get("short_positions", {})
+    synced:       dict[str, dict] = {}
+    synced_short: dict[str, dict] = {}
+
     for item in r.json():
         symbol = normalize_symbol(str(item.get("symbol", "")))
         if not symbol:
@@ -349,30 +446,48 @@ async def fetch_open_positions():
         except (TypeError, ValueError):
             last_price = avg_cost
 
-        old = existing.get(symbol, {})
-        persisted = risk_levels.get(symbol, {})
-        stop_loss = float(old.get("stop_loss", persisted.get("stop_loss", 0.0)) or 0.0)
-        take_profit = float(old.get("take_profit", persisted.get("take_profit", 0.0)) or 0.0)
-        # Bootstrap defaults for externally opened positions with no stored risk levels.
-        if stop_loss <= 0 and avg_cost > 0:
-            stop_loss = round(avg_cost * 0.975, 4)
-        if take_profit <= 0 and avg_cost > 0:
-            take_profit = round(avg_cost * 1.05, 4)
-
-        synced[symbol] = {
-            "quantity": qty,
-            "avg_cost": avg_cost,
-            "last_price": last_price,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
-        }
+        alpaca_side = (item.get("side") or "long").lower()
         state["last_prices"][symbol] = last_price
+
+        if alpaca_side == "short":
+            old_s       = existing_short.get(symbol, {})
+            stop_loss   = float(old_s.get("stop_loss",   0.0) or 0.0)
+            take_profit = float(old_s.get("take_profit", 0.0) or 0.0)
+            # Bootstrap: SL above entry, TP below entry.
+            if stop_loss  <= 0 or stop_loss  <= avg_cost:
+                stop_loss   = round(avg_cost * 1.025, 4)
+            if take_profit <= 0 or take_profit >= avg_cost:
+                take_profit = round(avg_cost * 0.95,  4)
+            synced_short[symbol] = {
+                "quantity":    qty,
+                "avg_cost":    avg_cost,
+                "last_price":  last_price,
+                "stop_loss":   stop_loss,
+                "take_profit": take_profit,
+            }
+        else:
+            old         = existing.get(symbol, {})
+            persisted   = risk_levels.get(symbol, {})
+            stop_loss   = float(old.get("stop_loss",   persisted.get("stop_loss",   0.0)) or 0.0)
+            take_profit = float(old.get("take_profit", persisted.get("take_profit", 0.0)) or 0.0)
+            if stop_loss  <= 0 and avg_cost > 0:
+                stop_loss   = round(avg_cost * 0.975, 4)
+            if take_profit <= 0 and avg_cost > 0:
+                take_profit = round(avg_cost * 1.05,  4)
+            synced[symbol] = {
+                "quantity":    qty,
+                "avg_cost":    avg_cost,
+                "last_price":  last_price,
+                "stop_loss":   stop_loss,
+                "take_profit": take_profit,
+            }
 
         # Ensure pre-existing Alpaca positions are still analysed/monitored.
         if symbol not in SYMBOLS:
             SYMBOLS.append(symbol)
 
-    state["positions"] = synced
+    state["positions"]       = synced
+    state["short_positions"] = synced_short
 
 
 async def fetch_bars(symbol: str, limit: int = 60, timeframe: str = "1Min") -> pd.DataFrame:
@@ -587,29 +702,35 @@ def compute_indicators(df: pd.DataFrame) -> dict:
 
 
 def build_prompt(symbol: str, indicators: dict, position: dict | None,
-                 higher_tf: dict | None = None, regime: str = "range") -> str:
+                 higher_tf: dict | None = None, regime: str = "range",
+                 short_position: dict | None = None) -> str:
     """
-    Alpha Arena-inspired prompt: forces LLM to declare stop-loss and take-profit
-    with every buy decision, and evaluate exits against current levels for holds.
-    Kept under ~1200 chars to maintain <30s response time on local hardware.
+    Prompt for LLM trading decisions. Supports both long and short positions.
+    Actions: buy (go long), sell (exit long), short (go short), cover (exit short), hold.
     """
-    asset_type = "crypto" if is_crypto(symbol) else "stock/ETF"
-    price = indicators["price"]
+    asset_type  = "crypto" if is_crypto(symbol) else "stock/ETF"
+    price       = indicators["price"]
+    can_short   = not is_crypto(symbol)
 
-    if not position:
-        pos_text = "No open position."
-    else:
+    if position and position.get("quantity", 0) > 0:
         entry  = position["avg_cost"]
         qty    = position["quantity"]
         pnl    = (price - entry) * qty
-        sl     = position.get("stop_loss")
-        tp     = position.get("take_profit")
-        sl_str = f"${sl:.4f}" if sl else "none"
-        tp_str = f"${tp:.4f}" if tp else "none"
-        pos_text = (
-            f"Holding {qty} units @ avg ${entry:.4f} | P&L: ${pnl:.2f} | "
-            f"SL: {sl_str} | TP: {tp_str}"
-        )
+        sl_str = f"${position.get('stop_loss'):.4f}" if position.get("stop_loss") else "none"
+        tp_str = f"${position.get('take_profit'):.4f}" if position.get("take_profit") else "none"
+        pos_text         = f"LONG {qty} units @ avg ${entry:.4f} | P&L: ${pnl:.2f} | SL: {sl_str} | TP: {tp_str}"
+        available_actions = '"sell" (exit long) | "hold"'
+    elif short_position and short_position.get("quantity", 0) > 0:
+        entry  = short_position["avg_cost"]
+        qty    = short_position["quantity"]
+        pnl    = (entry - price) * qty          # profit when price falls
+        sl_str = f"${short_position.get('stop_loss'):.4f}" if short_position.get("stop_loss") else "none"
+        tp_str = f"${short_position.get('take_profit'):.4f}" if short_position.get("take_profit") else "none"
+        pos_text         = f"SHORT {qty} units @ avg ${entry:.4f} | P&L: ${pnl:.2f} | SL: {sl_str} | TP: {tp_str}"
+        available_actions = '"cover" (close short) | "hold"'
+    else:
+        pos_text = "No open position."
+        available_actions = '"buy" (go long) | "short" (go short, stocks only) | "hold"' if can_short else '"buy" (go long) | "hold"'
 
     return f"""Disciplined algo trader — {symbol} ({asset_type}) paper session.
 
@@ -621,26 +742,31 @@ Indicators:
 - Higher TF EMA cross (15m): {(higher_tf or {}).get("ema_cross", "unknown")}
 - Market regime: {regime}
 Position: {pos_text}
+Available actions: {available_actions}
 
 Rules (strictly enforced):
-1. Pyramid ONLY if price > avg_cost — never add to a losing position
-2. Every BUY: stop_loss 1.5–2.5% below entry, take_profit ≥ 3% above entry (minimum 2:1 R:R)
-3. RSI entry zone 35–65 only — avoid overbought (>65) and weak/downtrend (<35) conditions
-4. MACD must be above or crossing its signal line to confirm bullish momentum before buying
-5. ADX > 18 confirms trend strength; skip buy if ADX < 15 (choppy/no-trend market)
-6. Price must be at or above VWAP to confirm bullish session bias
-7. Auto-exit: price ≤ stop_loss → sell; price ≥ take_profit AND net P&L > 0 → sell
-8. High conviction only — confidence < 0.65 = hold; only the clearest, highest-quality setups
+1. BUY  — price ≥ VWAP, MACD > signal, EMA9 > EMA21, RSI 35–65, ADX > 15
+2. SHORT (stocks only) — price < VWAP, MACD < signal, EMA9 < EMA21, RSI 35–65, ADX > 15
+3. Every BUY:   stop_loss 1.5–2.5% BELOW entry, take_profit ≥ 3% ABOVE entry (min 2:1 R:R)
+4. Every SHORT: stop_loss 1.5–2.5% ABOVE entry, take_profit ≥ 3% BELOW entry (min 2:1 R:R)
+5. Pyramid ONLY if price > avg_cost for longs; ONLY if price < avg_cost for shorts
+6. Auto-exits handled by system — only choose "sell"/"cover" when rules are clearly met
+7. High conviction only — confidence < 0.70 = hold; only the clearest setups
+8. Only output actions listed in "Available actions" above
 
 Respond with ONLY valid JSON, no markdown:
-{{"action":"buy"|"sell"|"hold","confidence":0.0-1.0,"reasoning":"one sentence","stop_loss":0.0,"take_profit":0.0}}
-(stop_loss and take_profit are 0.0 for sell/hold actions)"""
+{{"action":"buy"|"sell"|"short"|"cover"|"hold","confidence":0.0-1.0,"reasoning":"one sentence","stop_loss":0.0,"take_profit":0.0}}
+For SHORT: stop_loss = price ABOVE entry (cuts loss if rises), take_profit = price BELOW entry
+For BUY:   stop_loss = price BELOW entry, take_profit = price ABOVE entry
+stop_loss and take_profit are 0.0 for hold actions"""
 
 
 async def ask_llm(symbol: str, indicators: dict, position: dict | None,
-                  higher_tf: dict | None = None, regime: str = "range") -> dict:
+                  higher_tf: dict | None = None, regime: str = "range",
+                  short_position: dict | None = None) -> dict:
     """Ask Ollama for a trading decision."""
-    prompt = build_prompt(symbol, indicators, position, higher_tf=higher_tf, regime=regime)
+    prompt = build_prompt(symbol, indicators, position, higher_tf=higher_tf, regime=regime,
+                          short_position=short_position)
     try:
         client = ollama.AsyncClient()
         response = await client.chat(
@@ -677,31 +803,46 @@ async def ask_llm(symbol: str, indicators: dict, position: dict | None,
 
 def check_stop_take(symbol: str, price: float) -> str | None:
     """
-    Check if current price has breached the stop-loss or hit take-profit.
-    Returns 'sell' if an exit condition is met, None otherwise.
+    Check long and short positions for SL/TP breaches.
+    Returns 'sell' (exit long), 'cover' (exit short), or None.
     Called BEFORE asking the LLM to avoid wasting inference on obvious exits.
     """
+    # ── Long position check ──────────────────────────────────────────────────
     pos = state["positions"].get(symbol)
-    if not pos or pos.get("quantity", 0) <= 0:
-        return None
-    sl = pos.get("stop_loss")
-    tp = pos.get("take_profit")
-    qty = float(pos.get("quantity", 0) or 0)
-    avg_cost = float(pos.get("avg_cost", price) or price)
-    if sl and price <= sl:
-        print(f"🛑 STOP-LOSS triggered for {symbol} @ ${price:.4f} (SL: ${sl:.4f})")
-        return "sell"
-    if tp and price >= tp:
-        est_fees = calc_fees(symbol, "sell", qty, price)
-        est_net = (price - avg_cost) * qty - est_fees
-        # Guardrail: only classify as take-profit when exit is actually net profitable.
-        if est_net > 0:
-            print(f"🎯 TAKE-PROFIT triggered for {symbol} @ ${price:.4f} (TP: ${tp:.4f})")
+    if pos and pos.get("quantity", 0) > 0:
+        sl       = pos.get("stop_loss")
+        tp       = pos.get("take_profit")
+        qty      = float(pos.get("quantity", 0) or 0)
+        avg_cost = float(pos.get("avg_cost", price) or price)
+        if sl and price <= sl:
+            print(f"🛑 STOP-LOSS triggered {symbol} @ ${price:.4f} (SL: ${sl:.4f})")
             return "sell"
-        print(
-            f"⚠️ TP level crossed for {symbol} but net P&L <= 0 "
-            f"(est {est_net:.2f}); ignoring TP exit"
-        )
+        if tp and price >= tp:
+            est_fees = calc_fees(symbol, "sell", qty, price)
+            est_net  = (price - avg_cost) * qty - est_fees
+            if est_net > 0:
+                print(f"🎯 TAKE-PROFIT triggered {symbol} @ ${price:.4f} (TP: ${tp:.4f})")
+                return "sell"
+            print(f"⚠️ TP crossed {symbol} but net P&L <= 0 (est {est_net:.2f}); ignoring")
+
+    # ── Short position check ─────────────────────────────────────────────────
+    short_pos = state["short_positions"].get(symbol)
+    if short_pos and short_pos.get("quantity", 0) > 0:
+        sl       = short_pos.get("stop_loss")    # above entry — triggers when price rises
+        tp       = short_pos.get("take_profit")  # below entry — triggers when price falls
+        qty      = float(short_pos.get("quantity", 0) or 0)
+        avg_cost = float(short_pos.get("avg_cost", price) or price)
+        if sl and price >= sl:
+            print(f"🛑 SHORT STOP-LOSS triggered {symbol} @ ${price:.4f} (SL: ${sl:.4f})")
+            return "cover"
+        if tp and price <= tp:
+            est_fees = calc_fees(symbol, "buy", qty, price)   # covering = buying back
+            est_net  = (avg_cost - price) * qty - est_fees
+            if est_net > 0:
+                print(f"🎯 SHORT TAKE-PROFIT triggered {symbol} @ ${price:.4f} (TP: ${tp:.4f})")
+                return "cover"
+            print(f"⚠️ Short TP crossed {symbol} but net P&L <= 0 (est {est_net:.2f}); ignoring")
+
     return None
 
 
@@ -709,16 +850,16 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
                               stop_loss: float = 0.0, take_profit: float = 0.0):
     """Execute a paper trade — submits real order to Alpaca paper env."""
     symbol = normalize_symbol(symbol)
-    portfolio_value = state["cash"] + sum(
-        p["quantity"] * state["last_prices"].get(s, p.get("avg_cost", price))
-        for s, p in state["positions"].items()
-        if p.get("quantity", 0) > 0
-    )
-    # Remaining headroom up to MAX_POS for this symbol (enables pyramiding)
-    current_pos_value = (
-        state["positions"].get(symbol, {}).get("quantity", 0)
-        * state["last_prices"].get(symbol, price if action == "buy" else 0)
-    )
+    portfolio_value = current_equity(price)
+    # Remaining headroom up to MAX_POS for this symbol.
+    if action == "short":
+        cur_short_qty = state["short_positions"].get(symbol, {}).get("quantity", 0)
+        current_pos_value = cur_short_qty * state["last_prices"].get(symbol, price)
+    else:
+        current_pos_value = (
+            state["positions"].get(symbol, {}).get("quantity", 0)
+            * state["last_prices"].get(symbol, price if action == "buy" else 0)
+        )
     max_spend = max(0, portfolio_value * MAX_POS - current_pos_value)
 
     if action == "buy":
@@ -818,6 +959,78 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         else:
             state["loss_streak"][symbol] = 0
 
+    elif action == "short":
+        # ── Open short position (stocks only — Alpaca does not support crypto shorts) ──
+        if is_crypto(symbol):
+            print(f"⚠️  Short blocked {symbol}: crypto shorting not supported on Alpaca")
+            return
+        quantity = int(max_spend / price)
+        if quantity < 1:
+            return
+
+        atr    = float(state["last_decision"].get(symbol, {}).get("indicators", {}).get("atr", 0.0) or 0.0)
+        atr_sl = round(price + ATR_SL_MULT * atr, 4) if atr > 0 else 0.0
+        atr_tp = round(price - ATR_TP_MULT * atr, 4) if atr > 0 else 0.0
+        sl_seed = atr_sl if atr_sl > price else stop_loss
+        tp_seed = atr_tp if 0 < atr_tp < price else take_profit
+        new_sl, new_tp = sanitize_short_risk_levels(price, sl_seed, tp_seed)
+
+        current_open_risk = compute_open_risk()
+        added_risk        = max(0.0, new_sl - price) * quantity
+        if current_open_risk + added_risk > portfolio_value * MAX_OPEN_RISK:
+            print(f"⚠️ Risk cap block (short) {symbol}: would exceed {MAX_OPEN_RISK:.0%} open-risk limit")
+            return
+
+        order = await submit_order(symbol, "sell", quantity)
+        if ALPACA_KEY and not order:
+            return
+
+        short_fees = calc_fees(symbol, "sell", quantity, price)
+        state["cash"] += quantity * price - short_fees   # receive proceeds from short sale
+        state["short_positions"][symbol] = {
+            "quantity":    quantity,
+            "avg_cost":    price,
+            "last_price":  price,
+            "stop_loss":   new_sl,
+            "take_profit": new_tp,
+        }
+        await db.record_trade(
+            symbol, "sell", quantity, price, reason,
+            stop_loss=new_sl, take_profit=new_tp, fees=short_fees,
+            strategy="short_open",
+        )
+        print(f"🟠 SHORT {quantity} {symbol} @ ${price:.4f} | SL: ${new_sl:.4f} | TP: ${new_tp:.4f} | fees: ${short_fees:.4f} | {reason}")
+
+    elif action == "cover":
+        # ── Close short position (buy back borrowed shares) ──────────────────
+        short_pos = state["short_positions"].get(symbol)
+        if not short_pos or short_pos.get("quantity", 0) <= 0:
+            return
+        quantity = short_pos["quantity"]
+
+        order = await submit_order(symbol, "buy", quantity)
+        if ALPACA_KEY and not order:
+            return
+
+        cover_fees = calc_fees(symbol, "buy", quantity, price)
+        avg_c      = float(short_pos.get("avg_cost", price) or price)
+        state["cash"]                                  -= quantity * price + cover_fees
+        state["short_positions"][symbol]["quantity"]    = 0
+        state["short_positions"][symbol]["last_price"]  = price
+        state["short_positions"][symbol]["stop_loss"]   = 0.0
+        state["short_positions"][symbol]["take_profit"] = 0.0
+        net_cover = (avg_c - price) * quantity - cover_fees
+        await db.record_trade(
+            symbol, "buy", quantity, price, reason,
+            stop_loss=0.0, take_profit=0.0, fees=cover_fees,
+            strategy="short_cover",
+        )
+        print(f"🔵 COVER {quantity} {symbol} @ ${price:.4f} | P&L: ${net_cover:.2f} | fees: ${cover_fees:.4f} | {reason}")
+        if net_cover < 0:
+            state["loss_streak"][symbol] = state["loss_streak"].get(symbol, 0) + 1
+        else:
+            state["loss_streak"][symbol] = 0
+
 
 async def analyse_symbol(symbol: str):
     """Full analysis -> decision -> optional execution for one symbol."""
@@ -842,31 +1055,44 @@ async def analyse_symbol(symbol: str):
     state["last_prices"][symbol] = price
     if symbol in state["positions"]:
         state["positions"][symbol]["last_price"] = price
+    if symbol in state["short_positions"]:
+        state["short_positions"][symbol]["last_price"] = price
 
-    # Ratchet trailing stops before the SL/TP check so fresh levels are applied.
+    # Ratchet trailing stops (long + short) before the SL/TP check.
     if ADD_ALL_FIVE:
         apply_trailing_stop(symbol, price)
 
-    # Fast-path: check stop-loss / take-profit before burning LLM tokens
+    # Fast-path: check SL/TP before burning LLM tokens.
+    # Returns "sell" (exit long), "cover" (exit short), or None.
     forced_exit = check_stop_take(symbol, price)
     if forced_exit:
-        pos = state["positions"][symbol]
-        sl  = pos.get("stop_loss", 0)
-        tp  = pos.get("take_profit", 0)
-        hit = "stop-loss" if price <= sl else "take-profit"
-        await execute_paper_trade(symbol, "sell", price, f"Auto-exit: {hit} triggered")
+        if forced_exit == "sell":
+            tgt  = state["positions"][symbol]
+            sl   = tgt.get("stop_loss", 0)
+            tp   = tgt.get("take_profit", 0)
+            hit  = "stop-loss" if price <= sl else "take-profit"
+        else:   # "cover"
+            tgt  = state["short_positions"][symbol]
+            sl   = tgt.get("stop_loss", 0)
+            tp   = tgt.get("take_profit", 0)
+            hit  = "stop-loss" if price >= sl else "take-profit"
+        reason_auto = f"Auto-{forced_exit}: {hit} triggered"
+        await execute_paper_trade(symbol, forced_exit, price, reason_auto)
         state["last_decision"][symbol] = {
-            "action": "sell", "confidence": 1.0,
-            "reasoning": f"Auto-exit: {hit} @ ${price:.4f}",
+            "action": forced_exit, "confidence": 1.0,
+            "reasoning": f"Auto-{forced_exit}: {hit} @ ${price:.4f}",
             "indicators": indicators,
             "timestamp": datetime.utcnow().isoformat(),
         }
-        await db.record_decision(symbol, "sell", 1.0, f"Auto-exit: {hit}", indicators)
+        await db.record_decision(symbol, forced_exit, 1.0, reason_auto, indicators)
         return
 
-    pos      = state["positions"].get(symbol)
-    position = pos if pos and pos.get("quantity", 0) > 0 else None
-    decision = await ask_llm(symbol, indicators, position, higher_tf=higher_tf, regime=regime)
+    pos            = state["positions"].get(symbol)
+    position       = pos if pos and pos.get("quantity", 0) > 0 else None
+    short_pos      = state["short_positions"].get(symbol)
+    short_position = short_pos if short_pos and short_pos.get("quantity", 0) > 0 else None
+    decision = await ask_llm(symbol, indicators, position, higher_tf=higher_tf, regime=regime,
+                             short_position=short_position)
 
     action     = decision.get("action", "hold")
     confidence = decision.get("confidence", 0.0)
@@ -874,21 +1100,38 @@ async def analyse_symbol(symbol: str):
     stop_loss  = float(decision.get("stop_loss", 0.0))
     take_profit = float(decision.get("take_profit", 0.0))
 
-    # Daily loss breaker: block new entries, still allow exits.
-    if ADD_ALL_FIVE and action == "buy" and state.get("halt_new_entries"):
+    # Daily loss breaker: block new entries (both long and short); exits always allowed.
+    if ADD_ALL_FIVE and action in ("buy", "short") and state.get("halt_new_entries"):
         action = "hold"
         confidence = 0.0
         reasoning = f"Daily loss guard active ({DAILY_LOSS_LIMIT_PCT:.1%})"
 
-    # Volume + VWAP + higher-timeframe trend filters.
+    # Long entry filters: VWAP, volume, HTF direction, RSI zone, MACD, ADX.
     if ADD_ALL_FIVE and action == "buy":
         ok, why_not = buy_filters_ok(indicators, higher_tf)
         if not ok:
             action = "hold"
             confidence = 0.0
-            reasoning = f"Entry filter blocked: {why_not}"
+            reasoning = f"Long filter blocked: {why_not}"
 
-    # Regime switch gating.
+    # Short entry filters: mirror bearish confluence check.
+    if action == "short":
+        if is_crypto(symbol):
+            action = "hold"
+            confidence = 0.0
+            reasoning = "Crypto shorting not supported on Alpaca"
+        elif not ENABLE_SHORT:
+            action = "hold"
+            confidence = 0.0
+            reasoning = "Short selling disabled (ENABLE_SHORT=false)"
+        elif ADD_ALL_FIVE:
+            ok, why_not = short_filters_ok(indicators, higher_tf)
+            if not ok:
+                action = "hold"
+                confidence = 0.0
+                reasoning = f"Short filter blocked: {why_not}"
+
+    # Regime switch gating — long side.
     if ADD_ALL_FIVE and action == "buy":
         if regime == "trend" and indicators.get("ema_cross") != "bullish":
             action = "hold"
@@ -899,8 +1142,19 @@ async def analyse_symbol(symbol: str):
             confidence = 0.0
             reasoning = "Regime=range; buy only on deeper pullback (RSI<=40)"
 
-    # Per-symbol consecutive loss cooldown: pause buys after >=2 straight losses.
-    if ADD_ALL_FIVE and action == "buy":
+    # Regime switch gating — short side.
+    if ADD_ALL_FIVE and action == "short":
+        if regime == "trend" and indicators.get("ema_cross") != "bearish":
+            action = "hold"
+            confidence = 0.0
+            reasoning = "Regime=trend but bearish confirmation missing for short entry"
+        if regime == "range" and float(indicators.get("rsi", 50)) < 60:
+            action = "hold"
+            confidence = 0.0
+            reasoning = "Regime=range; short only on overbought levels (RSI>=60)"
+
+    # Per-symbol consecutive loss cooldown: pause buys AND shorts after >=2 straight losses.
+    if ADD_ALL_FIVE and action in ("buy", "short"):
         streak = state.get("loss_streak", {}).get(symbol, 0)
         if streak >= 2:
             action = "hold"
@@ -918,7 +1172,7 @@ async def analyse_symbol(symbol: str):
 
     await db.record_decision(symbol, action, confidence, reasoning, indicators)
 
-    if confidence >= 0.70 and action in ("buy", "sell"):
+    if confidence >= 0.70 and action in ("buy", "sell", "short", "cover"):
         await execute_paper_trade(symbol, action, price, reasoning, stop_loss, take_profit)
 
 
@@ -951,7 +1205,8 @@ async def run_agent():
         state["status"] = "analysing"
         symbols_to_scan = list(dict.fromkeys([
             *SYMBOLS,
-            *[s for s, p in state["positions"].items() if p.get("quantity", 0) > 0],
+            *[s for s, p in state["positions"].items()       if p.get("quantity", 0) > 0],
+            *[s for s, p in state["short_positions"].items() if p.get("quantity", 0) > 0],
         ]))
         for symbol in symbols_to_scan:
             if not is_crypto(symbol) and not state.get("market_open"):

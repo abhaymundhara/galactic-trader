@@ -196,42 +196,64 @@ async def api_analytics():
     # Trades are returned latest-first; process oldest-first for FIFO realized pnl.
     trades = list(reversed(trades))
 
-    lots: dict[str, list[dict]] = defaultdict(list)
+    lots:       dict[str, list[dict]] = defaultdict(list)   # long FIFO
+    short_lots: dict[str, list[dict]] = defaultdict(list)   # short FIFO
     # Each entry: {pnl, timestamp} — keeps timestamps so charts match the KPIs.
     realized: list[dict] = []
 
     for t in trades:
-        symbol = t.get("symbol")
-        side = (t.get("side") or "").lower()
-        qty = _safe_num(t.get("quantity", 0), 0.0)
+        symbol   = t.get("symbol")
+        side     = (t.get("side")     or "").lower()
+        strategy = (t.get("strategy") or "").lower()
+        qty      = _safe_num(t.get("quantity", 0), 0.0)
         if not symbol or qty <= 0:
             continue
 
         value = _safe_num(t.get("value", 0), 0.0)
-        fees  = _safe_num(t.get("fees", 0), 0.0)
+        fees  = _safe_num(t.get("fees",  0), 0.0)
         ts    = t.get("timestamp", "")
 
-        if side == "buy":
+        if strategy == "short_open":
+            # Record the proceeds per share (net of fees) as the short lot cost.
+            unit_price = (value - fees) / qty if qty > 0 else 0.0
+            short_lots[symbol].append({"qty": qty, "unit_price": unit_price})
+
+        elif strategy == "short_cover":
+            # Match against short lots; P&L = proceeds_at_open − cost_to_cover − fees.
+            remaining = qty
+            revenue   = 0.0
+            while remaining > 1e-12 and short_lots[symbol]:
+                lot  = short_lots[symbol][0]
+                take = min(remaining, lot["qty"])
+                revenue   += take * lot["unit_price"]
+                lot["qty"] -= take
+                remaining  -= take
+                if lot["qty"] <= 1e-12:
+                    short_lots[symbol].pop(0)
+            if remaining > 1e-12:
+                revenue += remaining * (value / qty) if qty > 0 else 0.0
+            pnl = revenue - value - fees
+            realized.append({"pnl": pnl, "timestamp": ts, "symbol": symbol})
+
+        elif side == "buy":
             unit_cost = (value + fees) / qty if qty > 0 else 0.0
             lots[symbol].append({"qty": qty, "unit_cost": unit_cost})
-        elif side == "sell":
-            remaining = qty
-            cost_basis = 0.0
 
+        elif side == "sell":
+            remaining  = qty
+            cost_basis = 0.0
             while remaining > 1e-12 and lots[symbol]:
-                lot = lots[symbol][0]
+                lot  = lots[symbol][0]
                 take = min(remaining, lot["qty"])
                 cost_basis += take * lot["unit_cost"]
-                lot["qty"] -= take
-                remaining -= take
+                lot["qty"]  -= take
+                remaining   -= take
                 if lot["qty"] <= 1e-12:
                     lots[symbol].pop(0)
-
             # Fallback for unmatched qty (imported / missing buy records).
             if remaining > 1e-12:
                 est_unit = (value / qty) if qty > 0 else 0.0
                 cost_basis += remaining * est_unit
-
             pnl = value - fees - cost_basis
             realized.append({"pnl": pnl, "timestamp": ts, "symbol": symbol})
 
