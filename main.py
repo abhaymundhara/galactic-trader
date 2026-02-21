@@ -85,7 +85,10 @@ async def websocket_endpoint(websocket: WebSocket):
     clients.append(websocket)
     try:
         while True:
-            if websocket.client_state != WebSocketState.CONNECTED:
+            if (
+                websocket.client_state != WebSocketState.CONNECTED
+                or websocket.application_state != WebSocketState.CONNECTED
+            ):
                 break
 
             # Push live state every 3 seconds
@@ -125,11 +128,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 }
                 await websocket.send_json(_json_safe(payload))
             except Exception as ex:
-                msg = str(ex).lower()
-                if "close message" in msg or "disconnected" in msg:
+                raw = str(ex)
+                msg = raw.lower().strip()
+                # Empty exception text is commonly seen on websocket close paths.
+                if (
+                    not msg
+                    or "close message" in msg
+                    or "disconnected" in msg
+                    or websocket.client_state != WebSocketState.CONNECTED
+                    or websocket.application_state != WebSocketState.CONNECTED
+                ):
                     break
                 # Keep the socket alive and retry on next tick for transient errors.
-                print(f"WebSocket tick failed: {ex}")
+                print(f"WebSocket tick failed: {repr(ex)}")
                 continue
     except WebSocketDisconnect:
         pass
