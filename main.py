@@ -56,7 +56,11 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             # Push live state every 3 seconds
             await asyncio.sleep(3)
-            portfolio = await db.get_portfolio()
+            portfolio = [
+                {"symbol": s, **p}
+                for s, p in agent.state["positions"].items()
+                if p.get("quantity", 0) > 0
+            ]
             positions_value = sum(
                 p["quantity"] * agent.state["last_prices"].get(p["symbol"], p["last_price"])
                 for p in portfolio
@@ -96,7 +100,11 @@ async def api_snapshots(limit: int = 500):
 
 @app.get("/api/portfolio")
 async def api_portfolio():
-    return await db.get_portfolio()
+    return [
+        {"symbol": s, **p}
+        for s, p in agent.state["positions"].items()
+        if p.get("quantity", 0) > 0
+    ]
 
 
 @app.get("/api/status")

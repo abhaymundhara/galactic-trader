@@ -25,7 +25,7 @@ CRYPTO_DATA_BASE = "https://data.alpaca.markets/v1beta3"
 
 OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 # BTC/USD and ETH/USD trade 24/7 on Alpaca; GLD is a stock ETF (market hours only)
-SYMBOLS       = os.getenv("SYMBOLS", "BTC/USD,ETH/USD,GLD,AAPL,NVDA,AMZN,MSFT").split(",")
+SYMBOLS       = [s.strip() for s in os.getenv("SYMBOLS", "BTC/USD,ETH/USD,GLD,AAPL,NVDA,AMZN,MSFT").split(",") if s.strip()]
 MAX_POS       = float(os.getenv("MAX_POSITION_SIZE", "0.10"))
 STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 
@@ -97,6 +97,57 @@ async def fetch_account():
             state["cash"] = float(data.get("cash", state["cash"]))
         else:
             print(f"Account fetch failed: {r.status_code} {r.text}")
+
+
+async def fetch_open_positions():
+    """Sync currently open Alpaca positions into local in-memory state."""
+    if not ALPACA_KEY:
+        return
+
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{ALPACA_BASE}/positions", headers=headers, timeout=10)
+
+    if r.status_code != 200:
+        print(f"Positions fetch failed: {r.status_code} {r.text[:200]}")
+        return
+
+    existing = state.get("positions", {})
+    synced: dict[str, dict] = {}
+    for item in r.json():
+        symbol = item.get("symbol")
+        if not symbol:
+            continue
+        try:
+            qty = float(item.get("qty", 0) or 0)
+        except (TypeError, ValueError):
+            qty = 0.0
+        if qty <= 0:
+            continue
+
+        try:
+            avg_cost = float(item.get("avg_entry_price", 0) or 0)
+        except (TypeError, ValueError):
+            avg_cost = 0.0
+        try:
+            last_price = float(item.get("current_price", item.get("lastday_price", avg_cost)) or avg_cost)
+        except (TypeError, ValueError):
+            last_price = avg_cost
+
+        old = existing.get(symbol, {})
+        synced[symbol] = {
+            "quantity": qty,
+            "avg_cost": avg_cost,
+            "last_price": last_price,
+            "stop_loss": float(old.get("stop_loss", 0.0) or 0.0),
+            "take_profit": float(old.get("take_profit", 0.0) or 0.0),
+        }
+        state["last_prices"][symbol] = last_price
+
+        # Ensure pre-existing Alpaca positions are still analysed/monitored.
+        if symbol not in SYMBOLS:
+            SYMBOLS.append(symbol)
+
+    state["positions"] = synced
 
 
 async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
@@ -441,6 +492,7 @@ async def run_agent():
     """Main agent loop — runs every 5 minutes."""
     await db.init_db()
     await fetch_account()
+    await fetch_open_positions()
     state["running"] = True
     state["status"]  = "running"
     print(f"🚀 Galactic Trader started | symbols={SYMBOLS} | model={OLLAMA_MODEL}")
@@ -449,6 +501,9 @@ async def run_agent():
 
     loop_count = 0
     while state["running"]:
+        await fetch_account()
+        await fetch_open_positions()
+
         can_run = await is_market_open()
         if not can_run:
             state["status"] = "market_closed"
@@ -457,7 +512,11 @@ async def run_agent():
             continue
 
         state["status"] = "analysing"
-        for symbol in SYMBOLS:
+        symbols_to_scan = list(dict.fromkeys([
+            *SYMBOLS,
+            *[s for s, p in state["positions"].items() if p.get("quantity", 0) > 0],
+        ]))
+        for symbol in symbols_to_scan:
             if not is_crypto(symbol) and not state.get("market_open"):
                 continue
             await analyse_symbol(symbol)
