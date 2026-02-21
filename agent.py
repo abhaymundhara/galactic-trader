@@ -242,7 +242,7 @@ Indicators:
 Position: {pos_text}
 
 Rules:
-1. Max 10% portfolio per position
+1. Max 10% portfolio per position total (pyramiding allowed — buy more if position < 10%)
 2. Every BUY must include stop_loss (2-3% below entry) and take_profit (4-6% above entry)
 3. If holding and price hits or breaches stop_loss → action: sell
 4. If holding and price hits or exceeds take_profit → action: sell
@@ -320,7 +320,12 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         for s, p in state["positions"].items()
         if p.get("quantity", 0) > 0
     )
-    max_spend = portfolio_value * MAX_POS
+    # Remaining headroom up to MAX_POS for this symbol (enables pyramiding)
+    current_pos_value = (
+        state["positions"].get(symbol, {}).get("quantity", 0)
+        * state["last_prices"].get(symbol, price if action == "buy" else 0)
+    )
+    max_spend = max(0, portfolio_value * MAX_POS - current_pos_value)
 
     if action == "buy":
         if is_crypto(symbol):
