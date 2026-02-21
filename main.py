@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketState
 
 import database as db
 import agent
@@ -84,6 +85,9 @@ async def websocket_endpoint(websocket: WebSocket):
     clients.append(websocket)
     try:
         while True:
+            if websocket.client_state != WebSocketState.CONNECTED:
+                break
+
             # Push live state every 3 seconds
             await asyncio.sleep(3)
             try:
@@ -121,12 +125,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 }
                 await websocket.send_json(_json_safe(payload))
             except Exception as ex:
-                # Keep the socket alive and retry on next tick.
+                msg = str(ex).lower()
+                if "close message" in msg or "disconnected" in msg:
+                    break
+                # Keep the socket alive and retry on next tick for transient errors.
                 print(f"WebSocket tick failed: {ex}")
                 continue
     except WebSocketDisconnect:
-        _safe_remove_client(websocket)
+        pass
     except Exception:
+        pass
+    finally:
         _safe_remove_client(websocket)
 
 
