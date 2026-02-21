@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import math
+from decimal import Decimal, ROUND_DOWN
 import httpx
 import pandas as pd
 from ta.momentum import RSIIndicator
@@ -58,6 +59,23 @@ ANALYSIS_INTERVAL_SECONDS = int(os.getenv("ANALYSIS_INTERVAL_SECONDS", "15" if C
 _SEC_RATE  = 0.0000278   # per $ of principal, sells only
 _TAF_RATE  = 0.000166    # per share, sells only, max $8.30
 _CAT_RATE  = 0.0000265   # per share, equities only (buys + sells)
+
+
+def normalize_crypto_order_qty(qty: float) -> float:
+    """Normalize crypto qty to Alpaca step precision without rounding up."""
+    q = Decimal(str(float(qty or 0)))
+    if q <= 0:
+        return 0.0
+    step = Decimal("0.000001")
+    return float(q.quantize(step, rounding=ROUND_DOWN))
+
+
+def is_actionable_position_qty(symbol: str, qty: float) -> bool:
+    """Whether qty is tradable for this symbol under our order precision rules."""
+    q = float(qty or 0)
+    if is_crypto(symbol):
+        return normalize_crypto_order_qty(q) > 0
+    return q >= 1
 
 
 def calc_fees(symbol: str, action: str, quantity: float, price: float) -> float:
@@ -375,6 +393,7 @@ state = {
     "halt_new_entries": False,
     "loss_streak": {},        # symbol -> consecutive closed losses; >=2 triggers cooldown
     "short_positions": {},   # symbol -> {quantity, avg_cost, last_price, stop_loss, take_profit}
+    "last_order_error": "",
 }
 
 # Auth headers for all Alpaca calls
@@ -566,7 +585,7 @@ async def fetch_open_positions():
             continue
         alpaca_side = (item.get("side") or "long").lower()
         qty = _normalize_position_qty(item.get("qty", 0), alpaca_side)
-        if qty <= 0:
+        if qty <= 0 or not is_actionable_position_qty(symbol, qty):
             continue
 
         try:
@@ -761,20 +780,31 @@ async def submit_order(symbol: str, side: str, qty: float) -> dict | None:
     - Stocks: integer qty, time_in_force = day
     """
     if not ALPACA_KEY:
+        state["last_order_error"] = ""
         return None
     symbol = normalize_symbol(symbol)
     if is_crypto(symbol):
+        norm_qty = normalize_crypto_order_qty(qty)
+        if norm_qty <= 0:
+            state["last_order_error"] = f"Order blocked: qty too small after precision normalization ({qty})"
+            print(f"Order blocked {side} {qty}x {symbol}: qty too small after precision normalization")
+            return None
         payload = {
             "symbol":        symbol,
-            "qty":           str(round(qty, 6)),
+            "qty":           str(norm_qty),
             "side":          side,
             "type":          "market",
             "time_in_force": "gtc",
         }
     else:
+        int_qty = int(qty)
+        if int_qty < 1:
+            state["last_order_error"] = f"Order blocked: quantity < 1 share ({qty})"
+            print(f"Order blocked {side} {qty}x {symbol}: quantity < 1 share")
+            return None
         payload = {
             "symbol":        symbol,
-            "qty":           str(int(qty)),
+            "qty":           str(int_qty),
             "side":          side,
             "type":          "market",
             "time_in_force": "day",
@@ -787,8 +817,11 @@ async def submit_order(symbol: str, side: str, qty: float) -> dict | None:
             timeout=10
         )
     if r.status_code in (200, 201):
+        state["last_order_error"] = ""
         return r.json()
-    print(f"Order failed {side} {qty}x {symbol}: {r.status_code} {r.text[:200]}")
+    err = f"{r.status_code} {r.text[:200]}"
+    state["last_order_error"] = err
+    print(f"Order failed {side} {qty}x {symbol}: {err}")
     return None
 
 
@@ -974,6 +1007,8 @@ def check_stop_take(symbol: str, price: float) -> str | None:
     # ── Long position check ──────────────────────────────────────────────────
     pos = state["positions"].get(symbol)
     if pos and pos.get("quantity", 0) > 0:
+        if not is_actionable_position_qty(symbol, float(pos.get("quantity", 0) or 0)):
+            return None
         sl       = pos.get("stop_loss")
         tp       = pos.get("take_profit")
         qty      = float(pos.get("quantity", 0) or 0)
@@ -992,6 +1027,8 @@ def check_stop_take(symbol: str, price: float) -> str | None:
     # ── Short position check ─────────────────────────────────────────────────
     short_pos = state["short_positions"].get(symbol)
     if short_pos and short_pos.get("quantity", 0) > 0:
+        if not is_actionable_position_qty(symbol, float(short_pos.get("quantity", 0) or 0)):
+            return None
         sl       = short_pos.get("stop_loss")    # above entry — triggers when price rises
         tp       = short_pos.get("take_profit")  # below entry — triggers when price falls
         qty      = float(short_pos.get("quantity", 0) or 0)
@@ -1011,7 +1048,7 @@ def check_stop_take(symbol: str, price: float) -> str | None:
 
 
 async def execute_paper_trade(symbol: str, action: str, price: float, reason: str,
-                              stop_loss: float = 0.0, take_profit: float = 0.0):
+                              stop_loss: float = 0.0, take_profit: float = 0.0) -> bool:
     """Execute a paper trade — submits real order to Alpaca paper env."""
     symbol = normalize_symbol(symbol)
     portfolio_value = current_equity(price)
@@ -1033,21 +1070,21 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
             avg_c = float(existing.get("avg_cost", price) or price)
             if price < avg_c * 0.998:  # position losing by >0.2%
                 print(f"⚠️  Pyramid blocked {symbol}: price ${price:.4f} < avg ${avg_c:.4f}")
-                return
+                return False
 
         if is_crypto(symbol):
             quantity = round(max_spend / price, 6)
             if quantity <= 0 or state["cash"] < price * 0.001:
-                return
+                return False
         else:
             quantity = int(max_spend / price)
             if quantity < 1 or state["cash"] < price:
-                return
+                return False
             cost = quantity * price
             if state["cash"] < cost:
                 quantity = int(state["cash"] / price)
             if quantity < 1:
-                return
+                return False
 
         # ATR-based protective levels (fallback to sanitized LLM/default values).
         atr = float(state["last_decision"].get(symbol, {}).get("indicators", {}).get("atr", 0.0) or 0.0)
@@ -1065,17 +1102,20 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
                 f"⚠️ Risk cap block {symbol}: open_risk={current_open_risk:.2f} + "
                 f"added={added_risk:.2f} > limit={(portfolio_value * MAX_OPEN_RISK):.2f}"
             )
-            return
+            return False
 
         order = await submit_order(symbol, "buy", quantity)
         if ALPACA_KEY and not order:
-            return
+            return False
 
-        buy_fees = calc_fees(symbol, "buy", quantity, price)
-        state["cash"] -= quantity * price + buy_fees
+        exec_qty = float(order.get("filled_qty") or quantity) if order else float(quantity)
+        if exec_qty <= 0:
+            exec_qty = float(quantity)
+        buy_fees = calc_fees(symbol, "buy", exec_qty, price)
+        state["cash"] -= exec_qty * price + buy_fees
         pos = state["positions"].get(symbol, {"quantity": 0, "avg_cost": price})
-        new_qty = pos["quantity"] + quantity
-        new_avg = (pos["quantity"] * pos.get("avg_cost", price) + quantity * price) / new_qty
+        new_qty = pos["quantity"] + exec_qty
+        new_avg = (pos["quantity"] * pos.get("avg_cost", price) + exec_qty * price) / new_qty
         state["positions"][symbol] = {
             "quantity":    new_qty,
             "avg_cost":    new_avg,
@@ -1086,7 +1126,7 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         await db.record_trade(
             symbol,
             "buy",
-            quantity,
+            exec_qty,
             price,
             reason,
             stop_loss=state["positions"][symbol]["stop_loss"],
@@ -1095,42 +1135,47 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         )
         sl = state["positions"][symbol]["stop_loss"]
         tp = state["positions"][symbol]["take_profit"]
-        print(f"🟢 BUY  {quantity} {symbol} @ ${price:.4f} | SL: ${sl:.4f} | TP: ${tp:.4f} | fees: ${buy_fees:.4f} | {reason}")
+        print(f"🟢 BUY  {exec_qty} {symbol} @ ${price:.4f} | SL: ${sl:.4f} | TP: ${tp:.4f} | fees: ${buy_fees:.4f} | {reason}")
+        return True
 
     elif action == "sell":
         pos = state["positions"].get(symbol)
         if not pos or pos.get("quantity", 0) <= 0:
-            return
+            return False
         quantity = pos["quantity"]
 
         order = await submit_order(symbol, "sell", quantity)
         if ALPACA_KEY and not order:
-            return
+            return False
 
-        sell_fees = calc_fees(symbol, "sell", quantity, price)
-        state["cash"] += quantity * price - sell_fees
+        exec_qty = float(order.get("filled_qty") or quantity) if order else float(quantity)
+        if exec_qty <= 0:
+            exec_qty = float(quantity)
+        sell_fees = calc_fees(symbol, "sell", exec_qty, price)
+        state["cash"] += exec_qty * price - sell_fees
         state["positions"][symbol]["quantity"]   = 0
         state["positions"][symbol]["last_price"] = price
         state["positions"][symbol]["stop_loss"]  = 0.0
         state["positions"][symbol]["take_profit"] = 0.0
-        await db.record_trade(symbol, "sell", quantity, price, reason, stop_loss=0.0, take_profit=0.0, fees=sell_fees)
-        print(f"🔴 SELL {quantity} {symbol} @ ${price:.4f} | fees: ${sell_fees:.4f} | {reason}")
+        await db.record_trade(symbol, "sell", exec_qty, price, reason, stop_loss=0.0, take_profit=0.0, fees=sell_fees)
+        print(f"🔴 SELL {exec_qty} {symbol} @ ${price:.4f} | fees: ${sell_fees:.4f} | {reason}")
         # Track per-symbol consecutive loss streak for cooldown.
         avg_c    = float(pos.get("avg_cost", price) or price)
-        net_sell = (price - avg_c) * quantity - sell_fees
+        net_sell = (price - avg_c) * exec_qty - sell_fees
         if net_sell < 0:
             state["loss_streak"][symbol] = state["loss_streak"].get(symbol, 0) + 1
         else:
             state["loss_streak"][symbol] = 0
+        return True
 
     elif action == "short":
         # ── Open short position (stocks only — Alpaca does not support crypto shorts) ──
         if is_crypto(symbol):
             print(f"⚠️  Short blocked {symbol}: crypto shorting not supported on Alpaca")
-            return
+            return False
         quantity = int(max_spend / price)
         if quantity < 1:
-            return
+            return False
 
         atr    = float(state["last_decision"].get(symbol, {}).get("indicators", {}).get("atr", 0.0) or 0.0)
         atr_sl = round(price + ATR_SL_MULT * atr, 4) if atr > 0 else 0.0
@@ -1143,57 +1188,67 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         added_risk        = max(0.0, new_sl - price) * quantity
         if current_open_risk + added_risk > portfolio_value * MAX_OPEN_RISK:
             print(f"⚠️ Risk cap block (short) {symbol}: would exceed {MAX_OPEN_RISK:.0%} open-risk limit")
-            return
+            return False
 
         order = await submit_order(symbol, "sell", quantity)
         if ALPACA_KEY and not order:
-            return
+            return False
 
-        short_fees = calc_fees(symbol, "sell", quantity, price)
-        state["cash"] += quantity * price - short_fees   # receive proceeds from short sale
+        exec_qty = float(order.get("filled_qty") or quantity) if order else float(quantity)
+        if exec_qty <= 0:
+            exec_qty = float(quantity)
+        short_fees = calc_fees(symbol, "sell", exec_qty, price)
+        state["cash"] += exec_qty * price - short_fees   # receive proceeds from short sale
         state["short_positions"][symbol] = {
-            "quantity":    quantity,
+            "quantity":    exec_qty,
             "avg_cost":    price,
             "last_price":  price,
             "stop_loss":   new_sl,
             "take_profit": new_tp,
         }
         await db.record_trade(
-            symbol, "sell", quantity, price, reason,
+            symbol, "sell", exec_qty, price, reason,
             stop_loss=new_sl, take_profit=new_tp, fees=short_fees,
             strategy="short_open",
         )
-        print(f"🟠 SHORT {quantity} {symbol} @ ${price:.4f} | SL: ${new_sl:.4f} | TP: ${new_tp:.4f} | fees: ${short_fees:.4f} | {reason}")
+        print(f"🟠 SHORT {exec_qty} {symbol} @ ${price:.4f} | SL: ${new_sl:.4f} | TP: ${new_tp:.4f} | fees: ${short_fees:.4f} | {reason}")
+        return True
 
     elif action == "cover":
         # ── Close short position (buy back borrowed shares) ──────────────────
         short_pos = state["short_positions"].get(symbol)
         if not short_pos or short_pos.get("quantity", 0) <= 0:
-            return
+            return False
         quantity = short_pos["quantity"]
 
         order = await submit_order(symbol, "buy", quantity)
         if ALPACA_KEY and not order:
-            return
+            return False
 
-        cover_fees = calc_fees(symbol, "buy", quantity, price)
+        exec_qty = float(order.get("filled_qty") or quantity) if order else float(quantity)
+        if exec_qty <= 0:
+            exec_qty = float(quantity)
+        cover_fees = calc_fees(symbol, "buy", exec_qty, price)
         avg_c      = float(short_pos.get("avg_cost", price) or price)
-        state["cash"]                                  -= quantity * price + cover_fees
+        state["cash"]                                  -= exec_qty * price + cover_fees
         state["short_positions"][symbol]["quantity"]    = 0
         state["short_positions"][symbol]["last_price"]  = price
         state["short_positions"][symbol]["stop_loss"]   = 0.0
         state["short_positions"][symbol]["take_profit"] = 0.0
-        net_cover = (avg_c - price) * quantity - cover_fees
+        net_cover = (avg_c - price) * exec_qty - cover_fees
         await db.record_trade(
-            symbol, "buy", quantity, price, reason,
+            symbol, "buy", exec_qty, price, reason,
             stop_loss=0.0, take_profit=0.0, fees=cover_fees,
             strategy="short_cover",
         )
-        print(f"🔵 COVER {quantity} {symbol} @ ${price:.4f} | P&L: ${net_cover:.2f} | fees: ${cover_fees:.4f} | {reason}")
+        print(f"🔵 COVER {exec_qty} {symbol} @ ${price:.4f} | P&L: ${net_cover:.2f} | fees: ${cover_fees:.4f} | {reason}")
         if net_cover < 0:
             state["loss_streak"][symbol] = state["loss_streak"].get(symbol, 0) + 1
         else:
             state["loss_streak"][symbol] = 0
+        return True
+
+    return False
 
 
 async def analyse_symbol(symbol: str):
@@ -1241,14 +1296,25 @@ async def analyse_symbol(symbol: str):
             tp   = tgt.get("take_profit", 0)
             hit  = "stop-loss" if price >= sl else "take-profit"
         reason_auto = f"Auto-{forced_exit}: {hit} triggered"
-        await execute_paper_trade(symbol, forced_exit, price, reason_auto)
-        state["last_decision"][symbol] = {
-            "action": forced_exit, "confidence": 1.0,
-            "reasoning": f"Auto-{forced_exit}: {hit} @ ${price:.4f}",
-            "indicators": indicators,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-        await db.record_decision(symbol, forced_exit, 1.0, reason_auto, indicators)
+        ok = await execute_paper_trade(symbol, forced_exit, price, reason_auto)
+        if ok:
+            state["last_decision"][symbol] = {
+                "action": forced_exit, "confidence": 1.0,
+                "reasoning": f"Auto-{forced_exit}: {hit} @ ${price:.4f}",
+                "indicators": indicators,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            await db.record_decision(symbol, forced_exit, 1.0, reason_auto, indicators)
+        else:
+            err = state.get("last_order_error") or "order failed"
+            fail_reason = f"Auto-{forced_exit} attempted but failed: {err}"
+            state["last_decision"][symbol] = {
+                "action": "hold", "confidence": 0.0,
+                "reasoning": fail_reason,
+                "indicators": indicators,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            await db.record_decision(symbol, "hold", 0.0, fail_reason, indicators)
         return
 
     pos            = state["positions"].get(symbol)
@@ -1348,7 +1414,18 @@ async def analyse_symbol(symbol: str):
     await db.record_decision(symbol, action, confidence, reasoning, indicators)
 
     if confidence >= 0.65 and action in ("buy", "sell", "short", "cover"):
-        await execute_paper_trade(symbol, action, price, reasoning, stop_loss, take_profit)
+        ok = await execute_paper_trade(symbol, action, price, reasoning, stop_loss, take_profit)
+        if not ok:
+            err = state.get("last_order_error") or "order failed"
+            fail_reason = f"Execution blocked: {err}"
+            state["last_decision"][symbol] = {
+                **state["last_decision"][symbol],
+                "action": "hold",
+                "confidence": 0.0,
+                "reasoning": fail_reason,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            await db.record_decision(symbol, "hold", 0.0, fail_reason, indicators)
 
 
 async def run_agent():
