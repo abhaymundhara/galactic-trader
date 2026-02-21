@@ -54,6 +54,35 @@ def calc_fees(symbol: str, action: str, quantity: float, price: float) -> float:
     # Round up to nearest penny (as Alpaca does)
     import math
     return math.ceil(fees * 100) / 100
+
+
+def sanitize_risk_levels(price: float, stop_loss: float, take_profit: float) -> tuple[float, float]:
+    """Ensure stop-loss/take-profit are logically valid around entry price."""
+    # Defaults: 2.5% SL, 5% TP
+    sl_default = round(price * 0.975, 4)
+    tp_default = round(price * 1.05, 4)
+
+    sl = float(stop_loss or 0.0)
+    tp = float(take_profit or 0.0)
+
+    # SL must be below entry.
+    if sl <= 0 or sl >= price:
+        sl = sl_default
+
+    # TP must be above entry.
+    if tp <= 0 or tp <= price:
+        tp = tp_default
+
+    # Ensure ordering: SL < entry < TP.
+    if sl >= price:
+        sl = sl_default
+    if tp <= price:
+        tp = tp_default
+    if sl >= tp:
+        sl = sl_default
+        tp = tp_default
+
+    return round(sl, 4), round(tp, 4)
 STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 
 # Shared state (read by dashboard)
@@ -487,12 +516,22 @@ def check_stop_take(symbol: str, price: float) -> str | None:
         return None
     sl = pos.get("stop_loss")
     tp = pos.get("take_profit")
+    qty = float(pos.get("quantity", 0) or 0)
+    avg_cost = float(pos.get("avg_cost", price) or price)
     if sl and price <= sl:
         print(f"🛑 STOP-LOSS triggered for {symbol} @ ${price:.4f} (SL: ${sl:.4f})")
         return "sell"
     if tp and price >= tp:
-        print(f"🎯 TAKE-PROFIT triggered for {symbol} @ ${price:.4f} (TP: ${tp:.4f})")
-        return "sell"
+        est_fees = calc_fees(symbol, "sell", qty, price)
+        est_net = (price - avg_cost) * qty - est_fees
+        # Guardrail: only classify as take-profit when exit is actually net profitable.
+        if est_net > 0:
+            print(f"🎯 TAKE-PROFIT triggered for {symbol} @ ${price:.4f} (TP: ${tp:.4f})")
+            return "sell"
+        print(
+            f"⚠️ TP level crossed for {symbol} but net P&L <= 0 "
+            f"(est {est_net:.2f}); ignoring TP exit"
+        )
     return None
 
 
@@ -536,12 +575,13 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         pos = state["positions"].get(symbol, {"quantity": 0, "avg_cost": price})
         new_qty = pos["quantity"] + quantity
         new_avg = (pos["quantity"] * pos.get("avg_cost", price) + quantity * price) / new_qty
+        new_sl, new_tp = sanitize_risk_levels(price, stop_loss, take_profit)
         state["positions"][symbol] = {
             "quantity":    new_qty,
             "avg_cost":    new_avg,
             "last_price":  price,
-            "stop_loss":   stop_loss if stop_loss > 0 else round(price * 0.975, 4),   # default 2.5% SL
-            "take_profit": take_profit if take_profit > 0 else round(price * 1.05, 4), # default 5% TP
+            "stop_loss":   new_sl,
+            "take_profit": new_tp,
         }
         await db.record_trade(
             symbol,
