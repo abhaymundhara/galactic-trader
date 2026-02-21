@@ -14,8 +14,12 @@ load_dotenv()
 
 ALPACA_KEY    = os.getenv("ALPACA_API_KEY", "")
 ALPACA_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
+
+# Paper trading endpoints (per Alpaca docs)
+# Switching to live: change ALPACA_BASE to https://api.alpaca.markets/v2
 ALPACA_BASE   = "https://paper-api.alpaca.markets/v2"
 DATA_BASE     = "https://data.alpaca.markets/v2"
+
 OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 SYMBOLS       = os.getenv("SYMBOLS", "AAPL,MSFT,NVDA,TSLA,AMZN").split(",")
 MAX_POS       = float(os.getenv("MAX_POSITION_SIZE", "0.10"))
@@ -24,15 +28,38 @@ STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 # Shared state (read by dashboard)
 state = {
     "cash": STARTING_CAP,
-    "positions": {},  # symbol → {quantity, avg_cost, last_price, unrealised_pnl}
+    "positions": {},  # symbol → {quantity, avg_cost, last_price}
     "last_prices": {},
     "last_decision": {},
     "running": False,
     "status": "idle",
-    "week": 1,        # 1-6 experiment week
+    "week": 1,
+    "market_open": False,
 }
 
-headers = {"APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET}
+# Auth headers for all Alpaca calls
+headers = {
+    "APCA-API-KEY-ID": ALPACA_KEY,
+    "APCA-API-SECRET-KEY": ALPACA_SECRET,
+    "accept": "application/json",
+    "content-type": "application/json",
+}
+
+
+async def is_market_open() -> bool:
+    """Check Alpaca clock — avoid wasting LLM calls outside market hours."""
+    if not ALPACA_KEY:
+        return True  # simulation mode: always "open"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{ALPACA_BASE}/clock", headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            state["market_open"] = data.get("is_open", False)
+            return state["market_open"]
+    except Exception as ex:
+        print(f"Clock check failed: {ex}")
+    return False
 
 
 async def fetch_account():
@@ -44,30 +71,69 @@ async def fetch_account():
         if r.status_code == 200:
             data = r.json()
             state["cash"] = float(data.get("cash", state["cash"]))
+        else:
+            print(f"Account fetch failed: {r.status_code} {r.text}")
 
 
 async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
-    """Fetch recent 1-min bars from Alpaca data feed."""
+    """
+    Fetch recent 1-min bars from Alpaca data feed.
+    Uses per-symbol endpoint: GET /v2/stocks/{symbol}/bars
+    Feed: iex (free tier) — no SIP subscription required.
+    """
     end   = datetime.utcnow()
     start = end - timedelta(hours=2)
     params = {
-        "symbols": symbol,
         "timeframe": "1Min",
-        "start": start.isoformat() + "Z",
-        "end":   end.isoformat() + "Z",
+        "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "end":   end.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "limit": limit,
-        "feed": "iex",
+        "feed":  "iex",         # free tier feed
+        "sort":  "asc",
     }
     async with httpx.AsyncClient() as client:
-        r = await client.get(f"{DATA_BASE}/stocks/bars", headers=headers, params=params, timeout=15)
+        r = await client.get(
+            f"{DATA_BASE}/stocks/{symbol}/bars",
+            headers={"APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET},
+            params=params,
+            timeout=15
+        )
     if r.status_code != 200:
+        print(f"Bars fetch failed for {symbol}: {r.status_code} {r.text[:200]}")
         return pd.DataFrame()
-    raw = r.json().get("bars", {}).get(symbol, [])
+    raw = r.json().get("bars", [])
     if not raw:
         return pd.DataFrame()
     df = pd.DataFrame(raw)
     df.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"}, inplace=True)
     return df
+
+
+async def submit_order(symbol: str, side: str, qty: int) -> dict | None:
+    """
+    Submit a paper order via POST /v2/orders.
+    Uses market order (day) with integer qty.
+    """
+    if not ALPACA_KEY:
+        return None
+    payload = {
+        "symbol":        symbol,
+        "qty":           str(qty),
+        "side":          side,       # "buy" or "sell"
+        "type":          "market",
+        "time_in_force": "day",
+    }
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{ALPACA_BASE}/orders",
+            headers=headers,
+            json=payload,
+            timeout=10
+        )
+    if r.status_code in (200, 201):
+        return r.json()
+    print(f"Order failed {side} {qty}x {symbol}: {r.status_code} {r.text[:200]}")
+    return None
 
 
 def compute_indicators(df: pd.DataFrame) -> dict:
@@ -80,13 +146,13 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     rsi   = ta.momentum.RSIIndicator(close, window=14).rsi()
     macd  = ta.trend.MACD(close)
     return {
-        "price":        round(float(close.iloc[-1]), 4),
-        "ema9":         round(float(ema9.iloc[-1]), 4),
-        "ema21":        round(float(ema21.iloc[-1]), 4),
-        "rsi":          round(float(rsi.iloc[-1]), 2),
-        "macd":         round(float(macd.macd().iloc[-1]), 4),
-        "macd_signal":  round(float(macd.macd_signal().iloc[-1]), 4),
-        "ema_cross":    "bullish" if ema9.iloc[-1] > ema21.iloc[-1] else "bearish",
+        "price":       round(float(close.iloc[-1]), 4),
+        "ema9":        round(float(ema9.iloc[-1]), 4),
+        "ema21":       round(float(ema21.iloc[-1]), 4),
+        "rsi":         round(float(rsi.iloc[-1]), 2),
+        "macd":        round(float(macd.macd().iloc[-1]), 4),
+        "macd_signal": round(float(macd.macd_signal().iloc[-1]), 4),
+        "ema_cross":   "bullish" if ema9.iloc[-1] > ema21.iloc[-1] else "bearish",
     }
 
 
@@ -127,7 +193,6 @@ async def ask_llm(symbol: str, indicators: dict, position: dict | None) -> dict:
             keep_alive="10m",
         )
         text = response["message"]["content"].strip()
-        # Strip markdown fences if present
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -139,10 +204,11 @@ async def ask_llm(symbol: str, indicators: dict, position: dict | None) -> dict:
 
 
 async def execute_paper_trade(symbol: str, action: str, price: float, reason: str):
-    """Execute a paper trade (Alpaca paper API or local simulation)."""
+    """Execute a paper trade — submits real order to Alpaca paper env, or simulates locally."""
     portfolio_value = state["cash"] + sum(
-        p["quantity"] * state["last_prices"].get(s, p["avg_cost"])
+        p["quantity"] * state["last_prices"].get(s, p.get("avg_cost", price))
         for s, p in state["positions"].items()
+        if p.get("quantity", 0) > 0
     )
     max_spend = portfolio_value * MAX_POS
 
@@ -155,19 +221,31 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
             quantity = int(state["cash"] / price)
         if quantity < 1:
             return
+
+        # Submit to Alpaca paper API (if keys configured)
+        order = await submit_order(symbol, "buy", quantity)
+        if ALPACA_KEY and not order:
+            return  # order rejected by Alpaca
+
+        # Update local state (Alpaca paper fills nearly instantly for market orders)
         state["cash"] -= quantity * price
         pos = state["positions"].get(symbol, {"quantity": 0, "avg_cost": price})
         new_qty = pos["quantity"] + quantity
-        new_avg = (pos["quantity"] * pos["avg_cost"] + quantity * price) / new_qty
+        new_avg = (pos["quantity"] * pos.get("avg_cost", price) + quantity * price) / new_qty
         state["positions"][symbol] = {"quantity": new_qty, "avg_cost": new_avg, "last_price": price}
         await db.record_trade(symbol, "buy", quantity, price, reason)
         print(f"🟢 BUY  {quantity}x {symbol} @ ${price:.2f} | {reason}")
 
     elif action == "sell":
         pos = state["positions"].get(symbol)
-        if not pos or pos["quantity"] < 1:
+        if not pos or pos.get("quantity", 0) < 1:
             return
-        quantity = pos["quantity"]
+        quantity = int(pos["quantity"])
+
+        order = await submit_order(symbol, "sell", quantity)
+        if ALPACA_KEY and not order:
+            return
+
         state["cash"] += quantity * price
         state["positions"][symbol]["quantity"] = 0
         state["positions"][symbol]["last_price"] = price
@@ -179,7 +257,7 @@ async def analyse_symbol(symbol: str):
     """Full analysis → decision → optional execution for one symbol."""
     df = await fetch_bars(symbol)
     if df.empty:
-        print(f"⚠️  No bars for {symbol}")
+        print(f"⚠️  No bars for {symbol} (market may be closed or IEX has no data)")
         return
 
     indicators = compute_indicators(df)
@@ -190,8 +268,9 @@ async def analyse_symbol(symbol: str):
     if symbol in state["positions"]:
         state["positions"][symbol]["last_price"] = indicators["price"]
 
-    position = state["positions"].get(symbol) if state["positions"].get(symbol, {}).get("quantity", 0) > 0 else None
-    decision = await ask_llm(symbol, indicators, position)
+    pos = state["positions"].get(symbol)
+    position = pos if pos and pos.get("quantity", 0) > 0 else None
+    decision  = await ask_llm(symbol, indicators, position)
 
     action     = decision.get("action", "hold")
     confidence = decision.get("confidence", 0.0)
@@ -216,19 +295,26 @@ async def run_agent():
     state["running"] = True
     state["status"]  = "running"
     print(f"🚀 Galactic Trader started | symbols={SYMBOLS} | model={OLLAMA_MODEL}")
+    print(f"   Paper API: {ALPACA_BASE}")
+    print(f"   Data  API: {DATA_BASE}")
 
     loop_count = 0
     while state["running"]:
+        open_market = await is_market_open()
+        if not open_market:
+            state["status"] = "market_closed"
+            print("💤 Market closed — sleeping 5 min")
+            await asyncio.sleep(300)
+            continue
+
         state["status"] = "analysing"
         for symbol in SYMBOLS:
             await analyse_symbol(symbol)
-            await asyncio.sleep(1)  # slight delay between symbols
+            await asyncio.sleep(1)
 
-        # Snapshot every loop
         snapshot = await db.record_snapshot(state["cash"], state["positions"])
-        state["status"] = "idle"
-        loop_count += 1
-        # Update experiment week (every ~2016 loops ≈ 7 days at 5-min intervals)
-        state["week"] = min(6, 1 + loop_count // 2016)
+        state["status"]  = "idle"
+        loop_count      += 1
+        state["week"]    = min(6, 1 + loop_count // 2016)
         print(f"📊 Snapshot — total: ${snapshot['total_value']:.2f} | P&L: ${snapshot['total_pnl']:.2f}")
-        await asyncio.sleep(300)  # 5-minute interval
+        await asyncio.sleep(300)
