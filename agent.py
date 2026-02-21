@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import math
 import httpx
 import pandas as pd
 from ta.momentum import RSIIndicator
@@ -245,30 +246,86 @@ def infer_regime(indicators: dict, higher_tf: dict | None) -> str:
     return "trend" if trending else "range"
 
 
-def buy_filters_ok(indicators: dict, higher_tf: dict | None) -> tuple[bool, str]:
-    price     = float(indicators.get("price", 0) or 0)
-    vwap      = float(indicators.get("vwap", 0) or 0)
-    vol_ratio = float(indicators.get("volume_ratio", 0) or 0)
+def _as_finite_float(value: Any, default: float = 0.0) -> float:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return default
+    return f if math.isfinite(f) else default
+
+
+def long_regime_gate_ok(indicators: dict, regime: str) -> tuple[bool, str]:
+    """Regime-specific long-entry gate that avoids over-blocking in range mode."""
+    rsi = _as_finite_float(indicators.get("rsi", 50), 50.0)
+    macd_val = _as_finite_float(indicators.get("macd", 0), 0.0)
+    macd_sig = _as_finite_float(indicators.get("macd_signal", 0), 0.0)
+    price = _as_finite_float(indicators.get("price", 0), 0.0)
+    vwap = _as_finite_float(indicators.get("vwap", 0), 0.0)
+    cross = indicators.get("ema_cross", "unknown")
+
+    if regime == "trend":
+        if cross != "bullish":
+            return False, "Regime=trend but bullish trend confirmation missing"
+        return True, "ok"
+
+    if regime == "range":
+        pullback_ok = 35 <= rsi <= 45 and macd_val >= macd_sig
+        momentum_ok = (
+            cross == "bullish"
+            and macd_val >= macd_sig
+            and (vwap <= 0 or price >= vwap)
+            and rsi <= 68
+        )
+        if pullback_ok or momentum_ok:
+            return True, "ok"
+        return False, "Regime=range; need bullish momentum setup or pullback (RSI 35-45)"
+
+    return True, "ok"
+
+
+def buy_filters_ok(symbol: str, indicators: dict, higher_tf: dict | None) -> tuple[bool, str]:
+    price     = _as_finite_float(indicators.get("price", 0), 0.0)
+    vwap      = _as_finite_float(indicators.get("vwap", 0), 0.0)
+    vol_ratio = _as_finite_float(indicators.get("volume_ratio", 0), 0.0)
     h_cross   = (higher_tf or {}).get("ema_cross", "unknown")
-    rsi       = float(indicators.get("rsi", 50) or 50)
-    macd_val  = float(indicators.get("macd", 0) or 0)
-    macd_sig  = float(indicators.get("macd_signal", 0) or 0)
-    adx       = float(indicators.get("adx", 0) or 0)
+    rsi       = _as_finite_float(indicators.get("rsi", 50), 50.0)
+    macd_val  = _as_finite_float(indicators.get("macd", 0), 0.0)
+    macd_sig  = _as_finite_float(indicators.get("macd_signal", 0), 0.0)
+    adx       = _as_finite_float(indicators.get("adx", 0), 0.0)
+    cross     = indicators.get("ema_cross", "unknown")
+    volume_reliable = bool(indicators.get("volume_reliable", vol_ratio > 0))
 
     if vwap > 0 and price < vwap:
         return False, "price below VWAP"
-    if vol_ratio < MIN_VOLUME_RATIO:
+
+    # Keep equity filters strict; relax crypto to avoid "always HOLD" in long-only mode.
+    if not is_crypto(symbol):
+        if vol_ratio < MIN_VOLUME_RATIO:
+            return False, f"low volume ratio {vol_ratio:.2f}"
+        if h_cross != "bullish":
+            return False, "higher-timeframe trend not bullish"
+        if rsi > 65:
+            return False, f"RSI overbought ({rsi:.1f} > 65)"
+        if rsi < 35:
+            return False, f"RSI too weak / downtrend ({rsi:.1f} < 35)"
+        if macd_val < macd_sig:
+            return False, f"MACD bearish (macd {macd_val:.4f} < signal {macd_sig:.4f})"
+        if adx < 15:
+            return False, f"ADX too low — no trend strength ({adx:.1f} < 15)"
+        return True, "ok"
+
+    if volume_reliable and vol_ratio < MIN_VOLUME_RATIO:
         return False, f"low volume ratio {vol_ratio:.2f}"
-    if h_cross != "bullish":
-        return False, "higher-timeframe trend not bullish"
-    if rsi > 65:
-        return False, f"RSI overbought ({rsi:.1f} > 65)"
-    if rsi < 35:
-        return False, f"RSI too weak / downtrend ({rsi:.1f} < 35)"
-    if macd_val < macd_sig:
+    if rsi > 72:
+        return False, f"RSI overbought ({rsi:.1f} > 72)"
+    if rsi < 30:
+        return False, f"RSI too weak / downtrend ({rsi:.1f} < 30)"
+    if macd_val < macd_sig and cross != "bullish":
         return False, f"MACD bearish (macd {macd_val:.4f} < signal {macd_sig:.4f})"
-    if adx < 15:
-        return False, f"ADX too low — no trend strength ({adx:.1f} < 15)"
+    if adx < 10 and macd_val < macd_sig:
+        return False, f"ADX very low with weak momentum ({adx:.1f} < 10)"
+    if h_cross != "bullish" and cross != "bullish" and macd_val < macd_sig:
+        return False, "higher-timeframe and local momentum both bearish"
     return True, "ok"
 
 
@@ -665,10 +722,12 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     """Compute trend, momentum, volatility, and volume indicators."""
     if len(df) < 40:
         return {}
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
-    volume = df["volume"]
+    high = pd.to_numeric(df["high"], errors="coerce")
+    low = pd.to_numeric(df["low"], errors="coerce")
+    close = pd.to_numeric(df["close"], errors="coerce")
+    volume = pd.to_numeric(df.get("volume", 0), errors="coerce").fillna(0.0)
+    if high.isna().iloc[-1] or low.isna().iloc[-1] or close.isna().iloc[-1]:
+        return {}
 
     ema9  = EMAIndicator(close, window=9).ema_indicator()
     ema21 = EMAIndicator(close, window=21).ema_indicator()
@@ -679,24 +738,41 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     bb = BollingerBands(close, window=20, window_dev=2)
     bb_high = bb.bollinger_hband()
     bb_low = bb.bollinger_lband()
-    vwap = VolumeWeightedAveragePrice(high, low, close, volume, window=14).volume_weighted_average_price()
+    vwap_series = VolumeWeightedAveragePrice(high, low, close, volume, window=14).volume_weighted_average_price()
     vol_sma = volume.rolling(20).mean()
 
-    last_close = float(close.iloc[-1])
-    last_bb_width = (float(bb_high.iloc[-1]) - float(bb_low.iloc[-1])) / last_close if last_close > 0 else 0.0
-    last_vol_ratio = float(volume.iloc[-1] / vol_sma.iloc[-1]) if float(vol_sma.iloc[-1] or 0) > 0 else 0.0
+    last_close = _as_finite_float(close.iloc[-1], 0.0)
+    last_bb_high = _as_finite_float(bb_high.iloc[-1], 0.0)
+    last_bb_low = _as_finite_float(bb_low.iloc[-1], 0.0)
+    last_bb_width = (last_bb_high - last_bb_low) / last_close if last_close > 0 else 0.0
+
+    last_vwap = _as_finite_float(vwap_series.iloc[-1], 0.0)
+    if last_vwap <= 0 and "vw" in df.columns:
+        # Alpaca crypto bars can have zero reported volume but still provide per-bar VWAP.
+        last_vwap = _as_finite_float(df["vw"].iloc[-1], 0.0)
+
+    vol_base = _as_finite_float(vol_sma.iloc[-1], 0.0)
+    last_vol = _as_finite_float(volume.iloc[-1], 0.0)
+    last_vol_ratio = (last_vol / vol_base) if vol_base > 0 else 0.0
+    recent_vol_sum = _as_finite_float(volume.tail(20).sum(), 0.0)
+    recent_nonzero = int((volume.tail(20) > 0).sum())
+    recent_window = min(len(volume), 20)
+    nonzero_share = (recent_nonzero / recent_window) if recent_window > 0 else 0.0
+    volume_reliable = vol_base > 0 and recent_vol_sum > 0 and nonzero_share >= 0.4
+
     return {
         "price":       round(last_close, 4),
-        "ema9":        round(float(ema9.iloc[-1]), 4),
-        "ema21":       round(float(ema21.iloc[-1]), 4),
-        "rsi":         round(float(rsi.iloc[-1]), 2),
-        "macd":        round(float(macd.macd().iloc[-1]), 4),
-        "macd_signal": round(float(macd.macd_signal().iloc[-1]), 4),
-        "atr":         round(float(atr.iloc[-1]), 4),
-        "adx":         round(float(adx.iloc[-1]), 2),
-        "vwap":        round(float(vwap.iloc[-1]), 4),
+        "ema9":        round(_as_finite_float(ema9.iloc[-1], 0.0), 4),
+        "ema21":       round(_as_finite_float(ema21.iloc[-1], 0.0), 4),
+        "rsi":         round(_as_finite_float(rsi.iloc[-1], 50.0), 2),
+        "macd":        round(_as_finite_float(macd.macd().iloc[-1], 0.0), 4),
+        "macd_signal": round(_as_finite_float(macd.macd_signal().iloc[-1], 0.0), 4),
+        "atr":         round(_as_finite_float(atr.iloc[-1], 0.0), 4),
+        "adx":         round(_as_finite_float(adx.iloc[-1], 0.0), 2),
+        "vwap":        round(last_vwap, 4),
         "bb_width":    round(float(last_bb_width), 5),
         "volume_ratio": round(float(last_vol_ratio), 3),
+        "volume_reliable": volume_reliable,
         "ema_cross":   "bullish" if ema9.iloc[-1] > ema21.iloc[-1] else "bearish",
     }
 
@@ -732,6 +808,27 @@ def build_prompt(symbol: str, indicators: dict, position: dict | None,
         pos_text = "No open position."
         available_actions = '"buy" (go long) | "short" (go short, stocks only) | "hold"' if can_short else '"buy" (go long) | "hold"'
 
+    if can_short:
+        rules_block = """1. BUY  — price ≥ VWAP, MACD > signal, EMA9 > EMA21, RSI 35–65, ADX > 15
+2. SHORT (stocks only) — price < VWAP, MACD < signal, EMA9 < EMA21, RSI 35–65, ADX > 15
+3. Every BUY:   stop_loss 1.5–2.5% BELOW entry, take_profit ≥ 3% ABOVE entry (min 2:1 R:R)
+4. Every SHORT: stop_loss 1.5–2.5% ABOVE entry, take_profit ≥ 3% BELOW entry (min 2:1 R:R)
+5. Pyramid ONLY if price > avg_cost for longs; ONLY if price < avg_cost for shorts
+6. Auto-exits handled by system — only choose "sell"/"cover" when rules are clearly met
+7. High conviction only — confidence < 0.65 = hold; only the clearest setups
+8. Only output actions listed in "Available actions" above"""
+    else:
+        rules_block = """1. BUY (crypto long-only) — use confluence, not perfect alignment:
+   treat as valid when at least 3 bullish confirmations align:
+   price ≥ VWAP (if VWAP is valid), MACD ≥ signal, EMA9 ≥ EMA21, RSI 35–70, ADX ≥ 10, higher TF bullish
+2. If volume data is missing/zero, do NOT reject a setup for that reason alone
+3. In range regime, allow either:
+   bullish momentum continuation (EMA9≥EMA21 and MACD≥signal) OR pullback buy (RSI 35–45 with MACD improving)
+4. Every BUY: stop_loss 1.5–2.5% BELOW entry, take_profit ≥ 3% ABOVE entry (min 2:1 R:R)
+5. Auto-exits are handled by system — choose "sell" only for clear invalidation/exit logic
+6. High conviction only — confidence < 0.65 = hold; only the clearest setups
+7. Only output actions listed in "Available actions" above"""
+
     return f"""Disciplined algo trader — {symbol} ({asset_type}) paper session.
 
 Indicators:
@@ -745,14 +842,7 @@ Position: {pos_text}
 Available actions: {available_actions}
 
 Rules (strictly enforced):
-1. BUY  — price ≥ VWAP, MACD > signal, EMA9 > EMA21, RSI 35–65, ADX > 15
-2. SHORT (stocks only) — price < VWAP, MACD < signal, EMA9 < EMA21, RSI 35–65, ADX > 15
-3. Every BUY:   stop_loss 1.5–2.5% BELOW entry, take_profit ≥ 3% ABOVE entry (min 2:1 R:R)
-4. Every SHORT: stop_loss 1.5–2.5% ABOVE entry, take_profit ≥ 3% BELOW entry (min 2:1 R:R)
-5. Pyramid ONLY if price > avg_cost for longs; ONLY if price < avg_cost for shorts
-6. Auto-exits handled by system — only choose "sell"/"cover" when rules are clearly met
-7. High conviction only — confidence < 0.65 = hold; only the clearest setups
-8. Only output actions listed in "Available actions" above
+{rules_block}
 
 Respond with ONLY valid JSON, no markdown:
 {{"action":"buy"|"sell"|"short"|"cover"|"hold","confidence":0.0-1.0,"reasoning":"one sentence","stop_loss":0.0,"take_profit":0.0}}
@@ -1108,7 +1198,7 @@ async def analyse_symbol(symbol: str):
 
     # Long entry filters: VWAP, volume, HTF direction, RSI zone, MACD, ADX.
     if ADD_ALL_FIVE and action == "buy":
-        ok, why_not = buy_filters_ok(indicators, higher_tf)
+        ok, why_not = buy_filters_ok(symbol, indicators, higher_tf)
         if not ok:
             action = "hold"
             confidence = 0.0
@@ -1133,14 +1223,11 @@ async def analyse_symbol(symbol: str):
 
     # Regime switch gating — long side.
     if ADD_ALL_FIVE and action == "buy":
-        if regime == "trend" and indicators.get("ema_cross") != "bullish":
+        ok, why_not = long_regime_gate_ok(indicators, regime=regime)
+        if not ok:
             action = "hold"
             confidence = 0.0
-            reasoning = "Regime=trend but bullish trend confirmation missing"
-        if regime == "range" and float(indicators.get("rsi", 50)) > 40:
-            action = "hold"
-            confidence = 0.0
-            reasoning = "Regime=range; buy only on deeper pullback (RSI<=40)"
+            reasoning = why_not
 
     # Regime switch gating — short side.
     if ADD_ALL_FIVE and action == "short":
