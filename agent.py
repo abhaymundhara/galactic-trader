@@ -25,7 +25,7 @@ CRYPTO_DATA_BASE = "https://data.alpaca.markets/v1beta3"
 
 OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 # BTC/USD and ETH/USD trade 24/7 on Alpaca; GLD is a stock ETF (market hours only)
-SYMBOLS       = os.getenv("SYMBOLS", "BTC/USD,ETH/USD,GLD").split(",")
+SYMBOLS       = os.getenv("SYMBOLS", "BTC/USD,ETH/USD,GLD,AAPL,NVDA,AMZN,MSFT").split(",")
 MAX_POS       = float(os.getenv("MAX_POSITION_SIZE", "0.10"))
 STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 
