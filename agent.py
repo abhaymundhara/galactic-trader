@@ -369,6 +369,7 @@ state = {
     "status": "idle",
     "week": 1,
     "market_open": False,
+    "stock_market_open": False,
     "risk_day": datetime.utcnow().strftime("%Y-%m-%d"),
     "daily_start_equity": STARTING_CAP,
     "halt_new_entries": False,
@@ -421,6 +422,33 @@ def is_crypto(symbol: str) -> bool:
     return "/" in s or s in CRYPTO_SYMBOLS
 
 
+def _normalize_position_qty(raw_qty: Any, side: str) -> float:
+    """Normalize Alpaca qty values; short qty may arrive negative in some responses."""
+    try:
+        qty = float(raw_qty or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    side_norm = (side or "long").lower()
+    if side_norm == "short":
+        qty = abs(qty)
+    return qty if qty > 0 else 0.0
+
+
+def should_analyse_symbol(symbol: str, stock_market_open: bool) -> bool:
+    """Crypto runs 24/7; stocks/ETFs only during stock market hours."""
+    return is_crypto(symbol) or stock_market_open
+
+
+def entry_market_open_ok(symbol: str) -> tuple[bool, str]:
+    """Block new stock entries while equities market is closed."""
+    if is_crypto(symbol):
+        return True, "ok"
+    stock_open = bool(state.get("stock_market_open", state.get("market_open", False)))
+    if not stock_open:
+        return False, "Stock market closed — cannot open new stock positions now"
+    return True, "ok"
+
+
 async def is_market_open() -> bool:
     """
     Crypto is 24/7 — always open.
@@ -431,10 +459,12 @@ async def is_market_open() -> bool:
     has_crypto = any(is_crypto(s) for s in SYMBOLS)
 
     if not has_stocks:
+        state["stock_market_open"] = False
         state["market_open"] = True
         return True
 
     if not ALPACA_KEY:
+        state["stock_market_open"] = True
         state["market_open"] = True
         return True
 
@@ -444,10 +474,13 @@ async def is_market_open() -> bool:
         if r.status_code == 200:
             data = r.json()
             stock_open = data.get("is_open", False)
+            state["stock_market_open"] = stock_open
             state["market_open"] = stock_open or has_crypto
             return state["market_open"]
     except Exception as ex:
         print(f"Clock check failed: {ex}")
+    state["stock_market_open"] = False
+    state["market_open"] = has_crypto
     return has_crypto
 
 
@@ -487,10 +520,8 @@ async def fetch_open_positions():
         symbol = normalize_symbol(str(item.get("symbol", "")))
         if not symbol:
             continue
-        try:
-            qty = float(item.get("qty", 0) or 0)
-        except (TypeError, ValueError):
-            qty = 0.0
+        alpaca_side = (item.get("side") or "long").lower()
+        qty = _normalize_position_qty(item.get("qty", 0), alpaca_side)
         if qty <= 0:
             continue
 
@@ -503,7 +534,6 @@ async def fetch_open_positions():
         except (TypeError, ValueError):
             last_price = avg_cost
 
-        alpaca_side = (item.get("side") or "long").lower()
         state["last_prices"][symbol] = last_price
 
         if alpaca_side == "short":
@@ -1196,6 +1226,14 @@ async def analyse_symbol(symbol: str):
         confidence = 0.0
         reasoning = f"Daily loss guard active ({DAILY_LOSS_LIMIT_PCT:.1%})"
 
+    # Market-hours guard for stock entries.
+    if action in ("buy", "short"):
+        ok, why_not = entry_market_open_ok(symbol)
+        if not ok:
+            action = "hold"
+            confidence = 0.0
+            reasoning = why_not
+
     # Long entry filters: VWAP, volume, HTF direction, RSI zone, MACD, ADX.
     if ADD_ALL_FIVE and action == "buy":
         ok, why_not = buy_filters_ok(symbol, indicators, higher_tf)
@@ -1295,8 +1333,9 @@ async def run_agent():
             *[s for s, p in state["positions"].items()       if p.get("quantity", 0) > 0],
             *[s for s, p in state["short_positions"].items() if p.get("quantity", 0) > 0],
         ]))
+        stock_open = bool(state.get("stock_market_open", state.get("market_open", False)))
         for symbol in symbols_to_scan:
-            if not is_crypto(symbol) and not state.get("market_open"):
+            if not should_analyse_symbol(symbol, stock_open):
                 continue
             await analyse_symbol(symbol)
             await asyncio.sleep(1)
