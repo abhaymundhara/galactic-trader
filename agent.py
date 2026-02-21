@@ -21,6 +21,7 @@ ALPACA_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
 # Switching to live: change ALPACA_BASE to https://api.alpaca.markets/v2
 ALPACA_BASE   = "https://paper-api.alpaca.markets/v2"
 DATA_BASE     = "https://data.alpaca.markets/v2"
+CRYPTO_DATA_BASE = "https://data.alpaca.markets/v1beta3"
 
 OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 # BTC/USD and ETH/USD trade 24/7 on Alpaca; GLD is a stock ETF (market hours only)
@@ -111,7 +112,7 @@ async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
     if is_crypto(symbol):
         # BTC/USD contains a slash — it breaks URL path routing (404).
         # Correct endpoint: GET /v2/crypto/us/bars?symbols=BTC%2FUSD
-        url = f"{DATA_BASE}/crypto/us/bars"
+        url = f"{CRYPTO_DATA_BASE}/crypto/us/bars"
         params = {
             "symbols":   symbol,   # httpx URL-encodes the slash automatically
             "timeframe": "1Min",
