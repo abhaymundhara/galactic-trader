@@ -25,6 +25,8 @@ async def init_db():
                 quantity REAL NOT NULL DEFAULT 0,
                 avg_cost REAL NOT NULL DEFAULT 0,
                 last_price REAL NOT NULL DEFAULT 0,
+                stop_loss REAL NOT NULL DEFAULT 0,
+                take_profit REAL NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
 
@@ -49,11 +51,21 @@ async def init_db():
                 executed INTEGER DEFAULT 0
             );
         """)
+
+        # Backward-compatible migration for existing databases.
+        col_rows = await (await db.execute("PRAGMA table_info(portfolio)")).fetchall()
+        cols = {row[1] for row in col_rows}
+        if "stop_loss" not in cols:
+            await db.execute("ALTER TABLE portfolio ADD COLUMN stop_loss REAL NOT NULL DEFAULT 0")
+        if "take_profit" not in cols:
+            await db.execute("ALTER TABLE portfolio ADD COLUMN take_profit REAL NOT NULL DEFAULT 0")
+
         await db.commit()
     print("✅ Database initialised")
 
 
-async def record_trade(symbol, side, quantity, price, reason="", strategy="ema_crossover"):
+async def record_trade(symbol, side, quantity, price, reason="", strategy="ema_crossover",
+                       stop_loss: float = 0.0, take_profit: float = 0.0):
     async with aiosqlite.connect(DB_PATH) as db:
         value = quantity * price
         await db.execute(
@@ -68,19 +80,19 @@ async def record_trade(symbol, side, quantity, price, reason="", strategy="ema_c
                 new_qty = row[0] + quantity
                 new_avg = (row[0] * row[1] + value) / new_qty
                 await db.execute(
-                    "UPDATE portfolio SET quantity=?, avg_cost=?, last_price=?, updated_at=? WHERE symbol=?",
-                    (new_qty, new_avg, price, datetime.utcnow().isoformat(), symbol)
+                    "UPDATE portfolio SET quantity=?, avg_cost=?, last_price=?, stop_loss=?, take_profit=?, updated_at=? WHERE symbol=?",
+                    (new_qty, new_avg, price, stop_loss, take_profit, datetime.utcnow().isoformat(), symbol)
                 )
             else:
                 await db.execute(
-                    "INSERT INTO portfolio (symbol, quantity, avg_cost, last_price, updated_at) VALUES (?,?,?,?,?)",
-                    (symbol, quantity, price, price, datetime.utcnow().isoformat())
+                    "INSERT INTO portfolio (symbol, quantity, avg_cost, last_price, stop_loss, take_profit, updated_at) VALUES (?,?,?,?,?,?,?)",
+                    (symbol, quantity, price, price, stop_loss, take_profit, datetime.utcnow().isoformat())
                 )
         elif side == "sell" and row:
             new_qty = max(0, row[0] - quantity)
             await db.execute(
-                "UPDATE portfolio SET quantity=?, last_price=?, updated_at=? WHERE symbol=?",
-                (new_qty, price, datetime.utcnow().isoformat(), symbol)
+                "UPDATE portfolio SET quantity=?, last_price=?, stop_loss=?, take_profit=?, updated_at=? WHERE symbol=?",
+                (new_qty, price, 0.0, 0.0, datetime.utcnow().isoformat(), symbol)
             )
         await db.commit()
 
@@ -158,3 +170,54 @@ async def get_portfolio():
         db.row_factory = aiosqlite.Row
         rows = await (await db.execute("SELECT * FROM portfolio WHERE quantity > 0")).fetchall()
         return [dict(r) for r in rows]
+
+
+async def get_portfolio_risk_levels():
+    """Return persisted stop-loss / take-profit values keyed by symbol."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            "SELECT symbol, stop_loss, take_profit FROM portfolio"
+        )).fetchall()
+        return {
+            r["symbol"]: {
+                "stop_loss": float(r["stop_loss"] or 0.0),
+                "take_profit": float(r["take_profit"] or 0.0),
+            }
+            for r in rows
+        }
+
+
+async def get_latest_decisions_by_symbol():
+    """Return latest decision row per symbol, parsed for dashboard restore."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            """
+            SELECT d.*
+            FROM decisions d
+            INNER JOIN (
+                SELECT symbol, MAX(id) AS max_id
+                FROM decisions
+                GROUP BY symbol
+            ) latest ON latest.max_id = d.id
+            """
+        )).fetchall()
+
+    out = {}
+    for r in rows:
+        indicators = {}
+        try:
+            indicators = json.loads(r["indicators"] or "{}")
+        except Exception:
+            indicators = {}
+        out[r["symbol"]] = {
+            "action": r["action"],
+            "confidence": float(r["confidence"] or 0.0),
+            "reasoning": r["reasoning"] or "",
+            "indicators": indicators,
+            "timestamp": r["timestamp"],
+            "stop_loss": 0.0,
+            "take_profit": 0.0,
+        }
+    return out

@@ -104,6 +104,8 @@ async def fetch_open_positions():
     if not ALPACA_KEY:
         return
 
+    risk_levels = await db.get_portfolio_risk_levels()
+
     async with httpx.AsyncClient() as client:
         r = await client.get(f"{ALPACA_BASE}/positions", headers=headers, timeout=10)
 
@@ -134,12 +136,13 @@ async def fetch_open_positions():
             last_price = avg_cost
 
         old = existing.get(symbol, {})
+        persisted = risk_levels.get(symbol, {})
         synced[symbol] = {
             "quantity": qty,
             "avg_cost": avg_cost,
             "last_price": last_price,
-            "stop_loss": float(old.get("stop_loss", 0.0) or 0.0),
-            "take_profit": float(old.get("take_profit", 0.0) or 0.0),
+            "stop_loss": float(old.get("stop_loss", persisted.get("stop_loss", 0.0)) or 0.0),
+            "take_profit": float(old.get("take_profit", persisted.get("take_profit", 0.0)) or 0.0),
         }
         state["last_prices"][symbol] = last_price
 
@@ -408,7 +411,15 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
             "stop_loss":   stop_loss if stop_loss > 0 else round(price * 0.975, 4),   # default 2.5% SL
             "take_profit": take_profit if take_profit > 0 else round(price * 1.05, 4), # default 5% TP
         }
-        await db.record_trade(symbol, "buy", quantity, price, reason)
+        await db.record_trade(
+            symbol,
+            "buy",
+            quantity,
+            price,
+            reason,
+            stop_loss=state["positions"][symbol]["stop_loss"],
+            take_profit=state["positions"][symbol]["take_profit"],
+        )
         sl = state["positions"][symbol]["stop_loss"]
         tp = state["positions"][symbol]["take_profit"]
         print(f"🟢 BUY  {quantity} {symbol} @ ${price:.4f} | SL: ${sl:.4f} | TP: ${tp:.4f} | {reason}")
@@ -428,7 +439,7 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         state["positions"][symbol]["last_price"] = price
         state["positions"][symbol]["stop_loss"]  = 0.0
         state["positions"][symbol]["take_profit"] = 0.0
-        await db.record_trade(symbol, "sell", quantity, price, reason)
+        await db.record_trade(symbol, "sell", quantity, price, reason, stop_loss=0.0, take_profit=0.0)
         print(f"🔴 SELL {quantity} {symbol} @ ${price:.4f} | {reason}")
 
 
@@ -491,6 +502,7 @@ async def analyse_symbol(symbol: str):
 async def run_agent():
     """Main agent loop — runs every 5 minutes."""
     await db.init_db()
+    state["last_decision"] = await db.get_latest_decisions_by_symbol()
     await fetch_account()
     await fetch_open_positions()
     state["running"] = True
