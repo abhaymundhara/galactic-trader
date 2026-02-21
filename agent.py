@@ -24,14 +24,14 @@ DATA_BASE     = "https://data.alpaca.markets/v2"
 
 OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 # BTC/USD and ETH/USD trade 24/7 on Alpaca; GLD is a stock ETF (market hours only)
-SYMBOLS       = os.getenv("SYMBOLS", "AAPL,MSFT,NVDA,TSLA,AMZN,BTC/USD,ETH/USD,GLD").split(",")
+SYMBOLS       = os.getenv("SYMBOLS", "BTC/USD,ETH/USD,GLD").split(",")
 MAX_POS       = float(os.getenv("MAX_POSITION_SIZE", "0.10"))
 STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 
 # Shared state (read by dashboard)
 state = {
     "cash": STARTING_CAP,
-    "positions": {},  # symbol → {quantity, avg_cost, last_price}
+    "positions": {},  # symbol -> {quantity, avg_cost, last_price, stop_loss, take_profit}
     "last_prices": {},
     "last_decision": {},
     "running": False,
@@ -78,12 +78,11 @@ async def is_market_open() -> bool:
         if r.status_code == 200:
             data = r.json()
             stock_open = data.get("is_open", False)
-            # Run if market is open OR we have crypto (always tradeable)
             state["market_open"] = stock_open or has_crypto
             return state["market_open"]
     except Exception as ex:
         print(f"Clock check failed: {ex}")
-    return has_crypto  # fallback: still run for crypto
+    return has_crypto
 
 
 async def fetch_account():
@@ -102,15 +101,14 @@ async def fetch_account():
 async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
     """
     Fetch recent 1-min bars.
-    - Crypto: GET /v2/crypto/us/{symbol}/bars (e.g. BTC/USD)
-    - Stocks/ETFs: GET /v2/stocks/{symbol}/bars  (IEX feed, free tier)
+    - Crypto: GET /v2/crypto/us/{symbol}/bars
+    - Stocks/ETFs: GET /v2/stocks/{symbol}/bars (IEX feed, free tier)
     """
     end   = datetime.utcnow()
     start = end - timedelta(hours=2)
     auth  = {"APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET}
 
     if is_crypto(symbol):
-        # Alpaca crypto endpoint uses the symbol as-is (BTC/USD)
         url = f"{DATA_BASE}/crypto/us/{symbol}/bars"
         params = {
             "timeframe": "1Min",
@@ -147,7 +145,7 @@ async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
 async def submit_order(symbol: str, side: str, qty: float) -> dict | None:
     """
     Submit a paper order via POST /v2/orders.
-    - Crypto: fractional qty supported (float), time_in_force = gtc
+    - Crypto: fractional qty (float), time_in_force = gtc
     - Stocks: integer qty, time_in_force = day
     """
     if not ALPACA_KEY:
@@ -158,7 +156,7 @@ async def submit_order(symbol: str, side: str, qty: float) -> dict | None:
             "qty":           str(round(qty, 6)),
             "side":          side,
             "type":          "market",
-            "time_in_force": "gtc",   # crypto requires gtc, not day
+            "time_in_force": "gtc",
         }
     else:
         payload = {
@@ -202,29 +200,48 @@ def compute_indicators(df: pd.DataFrame) -> dict:
 
 
 def build_prompt(symbol: str, indicators: dict, position: dict | None) -> str:
+    """
+    Alpha Arena-inspired prompt: forces LLM to declare stop-loss and take-profit
+    with every buy decision, and evaluate exits against current levels for holds.
+    Kept under ~1200 chars to maintain <30s response time on local hardware.
+    """
     asset_type = "crypto" if is_crypto(symbol) else "stock/ETF"
-    pos_text = "No open position." if not position else (
-        f"Holding {position['quantity']} units @ avg ${position['avg_cost']:.4f}. "
-        f"Current P&L: ${(indicators['price'] - position['avg_cost']) * position['quantity']:.2f}"
-    )
-    return f"""You are a disciplined algo trader analysing {symbol} ({asset_type}) for a paper trading session.
+    price = indicators["price"]
 
-Current indicators:
-- Price: ${indicators['price']}
-- EMA-9: {indicators['ema9']} | EMA-21: {indicators['ema21']} → {indicators['ema_cross']} crossover
-- RSI-14: {indicators['rsi']} (oversold <30, overbought >70)
-- MACD: {indicators['macd']} | Signal: {indicators['macd_signal']}
+    if not position:
+        pos_text = "No open position."
+    else:
+        entry  = position["avg_cost"]
+        qty    = position["quantity"]
+        pnl    = (price - entry) * qty
+        sl     = position.get("stop_loss")
+        tp     = position.get("take_profit")
+        sl_str = f"${sl:.4f}" if sl else "none"
+        tp_str = f"${tp:.4f}" if tp else "none"
+        pos_text = (
+            f"Holding {qty} units @ avg ${entry:.4f} | P&L: ${pnl:.2f} | "
+            f"SL: {sl_str} | TP: {tp_str}"
+        )
 
-Portfolio context: {pos_text}
+    return f"""Disciplined algo trader — {symbol} ({asset_type}) paper session.
+
+Indicators:
+- Price: ${price} | EMA9: {indicators["ema9"]} | EMA21: {indicators["ema21"]} ({indicators["ema_cross"]})
+- RSI: {indicators["rsi"]} | MACD: {indicators["macd"]} / Signal: {indicators["macd_signal"]}
+Position: {pos_text}
 
 Rules:
-1. Risk no more than 10% of total portfolio per position
-2. Do not buy overbought (RSI>72) or sell oversold (RSI<28) unless trend confirms
-3. Prefer EMA crossover confirmation before entering
-4. Always respond with valid JSON only
+1. Max 10% portfolio per position
+2. Every BUY must include stop_loss (2-3% below entry) and take_profit (4-6% above entry)
+3. If holding and price hits or breaches stop_loss → action: sell
+4. If holding and price hits or exceeds take_profit → action: sell
+5. No buy if RSI>72; no sell-short if RSI<28
+6. Prefer EMA crossover confirmation before entering
+7. High conviction only — confidence<0.65 = hold
 
-Respond with exactly this JSON (no markdown):
-{{"action": "buy" | "sell" | "hold", "confidence": 0.0-1.0, "reasoning": "one sentence"}}"""
+Respond with ONLY valid JSON, no markdown:
+{{"action":"buy"|"sell"|"hold","confidence":0.0-1.0,"reasoning":"one sentence","stop_loss":0.0,"take_profit":0.0}}
+(stop_loss and take_profit are 0.0 for sell/hold actions)"""
 
 
 async def ask_llm(symbol: str, indicators: dict, position: dict | None) -> dict:
@@ -260,10 +277,32 @@ async def ask_llm(symbol: str, indicators: dict, position: dict | None) -> dict:
         return json.loads(text.strip())
     except Exception as ex:
         print(f"LLM error for {symbol}: {ex}")
-        return {"action": "hold", "confidence": 0.0, "reasoning": f"LLM error: {ex}"}
+        return {"action": "hold", "confidence": 0.0, "reasoning": f"LLM error: {ex}",
+                "stop_loss": 0.0, "take_profit": 0.0}
 
 
-async def execute_paper_trade(symbol: str, action: str, price: float, reason: str):
+def check_stop_take(symbol: str, price: float) -> str | None:
+    """
+    Check if current price has breached the stop-loss or hit take-profit.
+    Returns 'sell' if an exit condition is met, None otherwise.
+    Called BEFORE asking the LLM to avoid wasting inference on obvious exits.
+    """
+    pos = state["positions"].get(symbol)
+    if not pos or pos.get("quantity", 0) <= 0:
+        return None
+    sl = pos.get("stop_loss")
+    tp = pos.get("take_profit")
+    if sl and price <= sl:
+        print(f"🛑 STOP-LOSS triggered for {symbol} @ ${price:.4f} (SL: ${sl:.4f})")
+        return "sell"
+    if tp and price >= tp:
+        print(f"🎯 TAKE-PROFIT triggered for {symbol} @ ${price:.4f} (TP: ${tp:.4f})")
+        return "sell"
+    return None
+
+
+async def execute_paper_trade(symbol: str, action: str, price: float, reason: str,
+                              stop_loss: float = 0.0, take_profit: float = 0.0):
     """Execute a paper trade — submits real order to Alpaca paper env."""
     portfolio_value = state["cash"] + sum(
         p["quantity"] * state["last_prices"].get(s, p.get("avg_cost", price))
@@ -274,7 +313,6 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
 
     if action == "buy":
         if is_crypto(symbol):
-            # Fractional crypto: buy in units (e.g. 0.001 BTC)
             quantity = round(max_spend / price, 6)
             if quantity <= 0 or state["cash"] < price * 0.001:
                 return
@@ -296,9 +334,17 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         pos = state["positions"].get(symbol, {"quantity": 0, "avg_cost": price})
         new_qty = pos["quantity"] + quantity
         new_avg = (pos["quantity"] * pos.get("avg_cost", price) + quantity * price) / new_qty
-        state["positions"][symbol] = {"quantity": new_qty, "avg_cost": new_avg, "last_price": price}
+        state["positions"][symbol] = {
+            "quantity":    new_qty,
+            "avg_cost":    new_avg,
+            "last_price":  price,
+            "stop_loss":   stop_loss if stop_loss > 0 else round(price * 0.975, 4),   # default 2.5% SL
+            "take_profit": take_profit if take_profit > 0 else round(price * 1.05, 4), # default 5% TP
+        }
         await db.record_trade(symbol, "buy", quantity, price, reason)
-        print(f"🟢 BUY  {quantity} {symbol} @ ${price:.4f} | {reason}")
+        sl = state["positions"][symbol]["stop_loss"]
+        tp = state["positions"][symbol]["take_profit"]
+        print(f"🟢 BUY  {quantity} {symbol} @ ${price:.4f} | SL: ${sl:.4f} | TP: ${tp:.4f} | {reason}")
 
     elif action == "sell":
         pos = state["positions"].get(symbol)
@@ -311,14 +357,16 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
             return
 
         state["cash"] += quantity * price
-        state["positions"][symbol]["quantity"] = 0
+        state["positions"][symbol]["quantity"]   = 0
         state["positions"][symbol]["last_price"] = price
+        state["positions"][symbol]["stop_loss"]  = 0.0
+        state["positions"][symbol]["take_profit"] = 0.0
         await db.record_trade(symbol, "sell", quantity, price, reason)
         print(f"🔴 SELL {quantity} {symbol} @ ${price:.4f} | {reason}")
 
 
 async def analyse_symbol(symbol: str):
-    """Full analysis → decision → optional execution for one symbol."""
+    """Full analysis -> decision -> optional execution for one symbol."""
     df = await fetch_bars(symbol)
     if df.empty:
         print(f"⚠️  No bars for {symbol}")
@@ -328,28 +376,49 @@ async def analyse_symbol(symbol: str):
     if not indicators:
         return
 
-    state["last_prices"][symbol] = indicators["price"]
+    price = indicators["price"]
+    state["last_prices"][symbol] = price
     if symbol in state["positions"]:
-        state["positions"][symbol]["last_price"] = indicators["price"]
+        state["positions"][symbol]["last_price"] = price
 
-    pos = state["positions"].get(symbol)
+    # Fast-path: check stop-loss / take-profit before burning LLM tokens
+    forced_exit = check_stop_take(symbol, price)
+    if forced_exit:
+        pos = state["positions"][symbol]
+        sl  = pos.get("stop_loss", 0)
+        tp  = pos.get("take_profit", 0)
+        hit = "stop-loss" if price <= sl else "take-profit"
+        await execute_paper_trade(symbol, "sell", price, f"Auto-exit: {hit} triggered")
+        state["last_decision"][symbol] = {
+            "action": "sell", "confidence": 1.0,
+            "reasoning": f"Auto-exit: {hit} @ ${price:.4f}",
+            "indicators": indicators,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        await db.record_decision(symbol, "sell", 1.0, f"Auto-exit: {hit}", indicators)
+        return
+
+    pos      = state["positions"].get(symbol)
     position = pos if pos and pos.get("quantity", 0) > 0 else None
-    decision  = await ask_llm(symbol, indicators, position)
+    decision = await ask_llm(symbol, indicators, position)
 
     action     = decision.get("action", "hold")
     confidence = decision.get("confidence", 0.0)
     reasoning  = decision.get("reasoning", "")
+    stop_loss  = float(decision.get("stop_loss", 0.0))
+    take_profit = float(decision.get("take_profit", 0.0))
 
     state["last_decision"][symbol] = {
         "action": action, "confidence": confidence,
         "reasoning": reasoning, "indicators": indicators,
+        "stop_loss": stop_loss, "take_profit": take_profit,
         "timestamp": datetime.utcnow().isoformat(),
     }
 
     await db.record_decision(symbol, action, confidence, reasoning, indicators)
 
     if confidence >= 0.65 and action in ("buy", "sell"):
-        await execute_paper_trade(symbol, action, indicators["price"], reasoning)
+        await execute_paper_trade(symbol, action, price, reasoning, stop_loss, take_profit)
 
 
 async def run_agent():
@@ -373,7 +442,6 @@ async def run_agent():
 
         state["status"] = "analysing"
         for symbol in SYMBOLS:
-            # Skip stock-market-hours-only symbols when market is closed
             if not is_crypto(symbol) and not state.get("market_open"):
                 continue
             await analyse_symbol(symbol)
