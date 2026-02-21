@@ -189,7 +189,10 @@ headers = {
     "content-type": "application/json",
 }
 
-CRYPTO_SYMBOLS = {"BTC/USD", "ETH/USD", "BTC/USDT", "ETH/USDT"}
+CRYPTO_SYMBOLS = {
+    "BTC/USD", "ETH/USD", "SOL/USD",
+    "BTC/USDT", "ETH/USDT", "XRP/USDT", "DOGE/USDT",
+}
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -200,8 +203,11 @@ def normalize_symbol(symbol: str) -> str:
     aliases = {
         "BTCUSD": "BTC/USD",
         "ETHUSD": "ETH/USD",
+        "SOLUSD": "SOL/USD",
         "BTCUSDT": "BTC/USDT",
         "ETHUSDT": "ETH/USDT",
+        "XRPUSDT": "XRP/USDT",
+        "DOGEUSDT": "DOGE/USDT",
     }
     if s in aliases:
         return aliases[s]
