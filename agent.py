@@ -4,8 +4,10 @@ import json
 import os
 import httpx
 import pandas as pd
-import ta
+from ta.momentum import RSIIndicator
+from ta.trend import EMAIndicator, MACD
 from datetime import datetime, timedelta
+from typing import Any, cast
 from dotenv import load_dotenv
 import ollama
 import database as db
@@ -20,9 +22,9 @@ ALPACA_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
 ALPACA_BASE   = "https://paper-api.alpaca.markets/v2"
 DATA_BASE     = "https://data.alpaca.markets/v2"
 
-OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 # BTC/USD and ETH/USD trade 24/7 on Alpaca; GLD is a stock ETF (market hours only)
-SYMBOLS       = os.getenv("SYMBOLS", "BTC/USD,ETH/USD,GLD").split(",")
+SYMBOLS       = os.getenv("SYMBOLS", "AAPL,MSFT,NVDA,TSLA,AMZN,BTC/USD,ETH/USD,GLD").split(",")
 MAX_POS       = float(os.getenv("MAX_POSITION_SIZE", "0.10"))
 STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 
@@ -184,10 +186,10 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     if len(df) < 26:
         return {}
     close = df["close"]
-    ema9  = ta.trend.EMAIndicator(close, window=9).ema_indicator()
-    ema21 = ta.trend.EMAIndicator(close, window=21).ema_indicator()
-    rsi   = ta.momentum.RSIIndicator(close, window=14).rsi()
-    macd  = ta.trend.MACD(close)
+    ema9  = EMAIndicator(close, window=9).ema_indicator()
+    ema21 = EMAIndicator(close, window=21).ema_indicator()
+    rsi   = RSIIndicator(close, window=14).rsi()
+    macd  = MACD(close)
     return {
         "price":       round(float(close.iloc[-1]), 4),
         "ema9":        round(float(ema9.iloc[-1]), 4),
@@ -236,7 +238,21 @@ async def ask_llm(symbol: str, indicators: dict, position: dict | None) -> dict:
             options={"temperature": 0.2},
             keep_alive="10m",
         )
-        text = response["message"]["content"].strip()
+        text = ""
+        if isinstance(response, dict):
+            text = str(response.get("message", {}).get("content", "")).strip()
+        elif hasattr(response, "__aiter__"):
+            chunks = []
+            async for chunk in cast(Any, response):
+                if isinstance(chunk, dict):
+                    chunks.append(str(chunk.get("message", {}).get("content", "")))
+            text = "".join(chunks).strip()
+        else:
+            text = str(response).strip()
+
+        if not text:
+            raise ValueError("Empty response from model")
+
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
