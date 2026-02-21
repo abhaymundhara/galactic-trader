@@ -865,7 +865,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script>
-      const ws = new WebSocket(`ws://${location.host}/ws`);
+      const wsProto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${wsProto}://${location.host}/ws`);
       let chart = null;
       let startVal = null;
       let feedItems = [];
@@ -966,6 +967,8 @@
         if (!startVal) startVal = d.total_value;
         const baseRef = baselineVal || startVal || d.total_value;
         const diff = d.total_value - baseRef;
+        const unrealized = Number(d.unrealized_pnl || 0);
+        const realized = diff - unrealized;
         const pnlEl = document.getElementById("hdr-pnl");
         pnlEl.textContent = (diff >= 0 ? "+" : "") + fmt(diff);
         pnlEl.className = "value " + (diff > 0 ? "up" : diff < 0 ? "dn" : "");
@@ -978,7 +981,12 @@
         );
 
         const pnlChange = document.getElementById("pnl-change");
-        pnlChange.textContent = fmtPct(diff, startVal || 1) + " from start";
+        pnlChange.textContent =
+          fmtPct(diff, baseRef || 1) +
+          " from start · U: " +
+          fmt(unrealized) +
+          " · R: " +
+          fmt(realized);
         pnlChange.className =
           "stat-change " + (diff > 0 ? "up" : diff < 0 ? "dn" : "neutral");
 

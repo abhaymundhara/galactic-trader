@@ -79,8 +79,32 @@ headers = {
 CRYPTO_SYMBOLS = {"BTC/USD", "ETH/USD", "BTC/USDT", "ETH/USDT"}
 
 
+def normalize_symbol(symbol: str) -> str:
+    """Normalize symbols to a canonical internal format (e.g. BTCUSD -> BTC/USD)."""
+    s = (symbol or "").strip().upper()
+    if not s:
+        return s
+    aliases = {
+        "BTCUSD": "BTC/USD",
+        "ETHUSD": "ETH/USD",
+        "BTCUSDT": "BTC/USDT",
+        "ETHUSDT": "ETH/USDT",
+    }
+    if s in aliases:
+        return aliases[s]
+    if "/" in s:
+        base, quote = s.split("/", 1)
+        return f"{base}/{quote}"
+    return s
+
+
+# Keep configured symbols canonicalized.
+SYMBOLS[:] = [normalize_symbol(s) for s in SYMBOLS]
+
+
 def is_crypto(symbol: str) -> bool:
-    return "/" in symbol or symbol in CRYPTO_SYMBOLS
+    s = normalize_symbol(symbol)
+    return "/" in s or s in CRYPTO_SYMBOLS
 
 
 async def is_market_open() -> bool:
@@ -143,7 +167,7 @@ async def fetch_open_positions():
     existing = state.get("positions", {})
     synced: dict[str, dict] = {}
     for item in r.json():
-        symbol = item.get("symbol")
+        symbol = normalize_symbol(str(item.get("symbol", "")))
         if not symbol:
             continue
         try:
@@ -164,12 +188,20 @@ async def fetch_open_positions():
 
         old = existing.get(symbol, {})
         persisted = risk_levels.get(symbol, {})
+        stop_loss = float(old.get("stop_loss", persisted.get("stop_loss", 0.0)) or 0.0)
+        take_profit = float(old.get("take_profit", persisted.get("take_profit", 0.0)) or 0.0)
+        # Bootstrap defaults for externally opened positions with no stored risk levels.
+        if stop_loss <= 0 and avg_cost > 0:
+            stop_loss = round(avg_cost * 0.975, 4)
+        if take_profit <= 0 and avg_cost > 0:
+            take_profit = round(avg_cost * 1.05, 4)
+
         synced[symbol] = {
             "quantity": qty,
             "avg_cost": avg_cost,
             "last_price": last_price,
-            "stop_loss": float(old.get("stop_loss", persisted.get("stop_loss", 0.0)) or 0.0),
-            "take_profit": float(old.get("take_profit", persisted.get("take_profit", 0.0)) or 0.0),
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
         }
         state["last_prices"][symbol] = last_price
 
@@ -186,6 +218,7 @@ async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
     - Crypto: GET /v2/crypto/us/{symbol}/bars
     - Stocks/ETFs: GET /v2/stocks/{symbol}/bars (IEX feed, free tier)
     """
+    symbol = normalize_symbol(symbol)
     end   = datetime.utcnow()
     start = end - timedelta(hours=2)
     auth  = {"APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET}
@@ -235,24 +268,72 @@ async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
 
 
 async def refresh_live_prices(symbols: list[str] | None = None):
-    """Refresh in-memory last prices for the provided symbols."""
-    targets = [s for s in (symbols or []) if s]
+    """Refresh in-memory last prices for the provided symbols (batched)."""
+    targets = [normalize_symbol(s) for s in (symbols or []) if s]
     if not targets:
         return
+    targets = list(dict.fromkeys(targets))
 
-    async def _refresh_one(sym: str):
+    stock_syms = [s for s in targets if not is_crypto(s)]
+    crypto_syms = [s for s in targets if is_crypto(s)]
+    missing = set(targets)
+    auth = {"APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET}
+
+    async with httpx.AsyncClient() as client:
+        if stock_syms:
+            try:
+                r = await client.get(
+                    f"{DATA_BASE}/stocks/bars/latest",
+                    headers=auth,
+                    params={"symbols": ",".join(stock_syms), "feed": "iex"},
+                    timeout=10,
+                )
+                if r.status_code == 200:
+                    bars = r.json().get("bars", {})
+                    for sym, bar in bars.items():
+                        ns = normalize_symbol(sym)
+                        px = float(bar.get("c", bar.get("close", 0)) or 0)
+                        if px > 0:
+                            state["last_prices"][ns] = px
+                            if ns in state["positions"]:
+                                state["positions"][ns]["last_price"] = px
+                            missing.discard(ns)
+            except Exception:
+                pass
+
+        if crypto_syms:
+            try:
+                r = await client.get(
+                    f"{CRYPTO_DATA_BASE}/crypto/us/latest/bars",
+                    headers=auth,
+                    params={"symbols": ",".join(crypto_syms)},
+                    timeout=10,
+                )
+                if r.status_code == 200:
+                    bars = r.json().get("bars", {})
+                    for sym, bar in bars.items():
+                        ns = normalize_symbol(sym)
+                        px = float(bar.get("c", bar.get("close", 0)) or 0)
+                        if px > 0:
+                            state["last_prices"][ns] = px
+                            if ns in state["positions"]:
+                                state["positions"][ns]["last_price"] = px
+                            missing.discard(ns)
+            except Exception:
+                pass
+
+    # Fallback for symbols not returned by latest-bars endpoints.
+    for sym in list(missing):
         try:
             df = await fetch_bars(sym, limit=1)
             if df.empty:
-                return
+                continue
             px = float(df["close"].iloc[-1])
             state["last_prices"][sym] = px
             if sym in state["positions"]:
                 state["positions"][sym]["last_price"] = px
         except Exception:
-            return
-
-    await asyncio.gather(*[_refresh_one(sym) for sym in dict.fromkeys(targets)])
+            continue
 
 
 async def submit_order(symbol: str, side: str, qty: float) -> dict | None:
@@ -263,6 +344,7 @@ async def submit_order(symbol: str, side: str, qty: float) -> dict | None:
     """
     if not ALPACA_KEY:
         return None
+    symbol = normalize_symbol(symbol)
     if is_crypto(symbol):
         payload = {
             "symbol":        symbol,
@@ -417,6 +499,7 @@ def check_stop_take(symbol: str, price: float) -> str | None:
 async def execute_paper_trade(symbol: str, action: str, price: float, reason: str,
                               stop_loss: float = 0.0, take_profit: float = 0.0):
     """Execute a paper trade — submits real order to Alpaca paper env."""
+    symbol = normalize_symbol(symbol)
     portfolio_value = state["cash"] + sum(
         p["quantity"] * state["last_prices"].get(s, p.get("avg_cost", price))
         for s, p in state["positions"].items()
@@ -496,6 +579,7 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
 
 async def analyse_symbol(symbol: str):
     """Full analysis -> decision -> optional execution for one symbol."""
+    symbol = normalize_symbol(symbol)
     df = await fetch_bars(symbol)
     if df.empty:
         print(f"⚠️  No bars for {symbol}")

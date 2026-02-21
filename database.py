@@ -5,6 +5,17 @@ from datetime import datetime
 
 DB_PATH = "trader.db"
 
+
+def normalize_symbol(symbol: str) -> str:
+    s = (symbol or "").strip().upper()
+    aliases = {
+        "BTCUSD": "BTC/USD",
+        "ETHUSD": "ETH/USD",
+        "BTCUSDT": "BTC/USDT",
+        "ETHUSDT": "ETH/USDT",
+    }
+    return aliases.get(s, s)
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript("""
@@ -72,6 +83,7 @@ async def init_db():
 
 async def record_trade(symbol, side, quantity, price, reason="", strategy="ema_crossover",
                        stop_loss: float = 0.0, take_profit: float = 0.0, fees: float = 0.0):
+    symbol = normalize_symbol(symbol)
     async with aiosqlite.connect(DB_PATH) as db:
         value = quantity * price
         await db.execute(
@@ -104,6 +116,7 @@ async def record_trade(symbol, side, quantity, price, reason="", strategy="ema_c
 
 
 async def record_decision(symbol, action, confidence, reasoning, indicators):
+    symbol = normalize_symbol(symbol)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO decisions (timestamp, symbol, action, confidence, reasoning, indicators) "
@@ -150,7 +163,12 @@ async def get_trades(limit=50):
         rows = await (await db.execute(
             "SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)
         )).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["symbol"] = normalize_symbol(d["symbol"])
+            out.append(d)
+        return out
 
 
 async def get_decisions(limit=50):
@@ -159,7 +177,12 @@ async def get_decisions(limit=50):
         rows = await (await db.execute(
             "SELECT * FROM decisions ORDER BY id DESC LIMIT ?", (limit,)
         )).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["symbol"] = normalize_symbol(d["symbol"])
+            out.append(d)
+        return out
 
 
 async def get_snapshots(limit=500):
@@ -175,7 +198,12 @@ async def get_portfolio():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = await (await db.execute("SELECT * FROM portfolio WHERE quantity > 0")).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["symbol"] = normalize_symbol(d["symbol"])
+            out.append(d)
+        return out
 
 
 async def get_portfolio_risk_levels():
@@ -186,7 +214,7 @@ async def get_portfolio_risk_levels():
             "SELECT symbol, stop_loss, take_profit FROM portfolio"
         )).fetchall()
         return {
-            r["symbol"]: {
+            normalize_symbol(r["symbol"]): {
                 "stop_loss": float(r["stop_loss"] or 0.0),
                 "take_profit": float(r["take_profit"] or 0.0),
             }
@@ -217,7 +245,7 @@ async def get_latest_decisions_by_symbol():
             indicators = json.loads(r["indicators"] or "{}")
         except Exception:
             indicators = {}
-        out[r["symbol"]] = {
+        out[normalize_symbol(r["symbol"])] = {
             "action": r["action"],
             "confidence": float(r["confidence"] or 0.0),
             "reasoning": r["reasoning"] or "",

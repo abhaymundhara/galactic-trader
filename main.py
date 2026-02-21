@@ -66,12 +66,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 p["quantity"] * agent.state["last_prices"].get(p["symbol"], p["last_price"])
                 for p in portfolio
             )
+            unrealized_pnl = sum(
+                (agent.state["last_prices"].get(p["symbol"], p["last_price"]) - p["avg_cost"]) * p["quantity"]
+                for p in portfolio
+            )
             total_value = agent.state["cash"] + positions_value
             payload = {
                 "type": "state",
                 "cash": round(agent.state["cash"], 2),
                 "total_value": round(total_value, 2),
                 "positions_value": round(positions_value, 2),
+                "unrealized_pnl": round(unrealized_pnl, 2),
                 "status": agent.state["status"],
                 "week": agent.state["week"],
                 "last_decisions": agent.state["last_decision"],
