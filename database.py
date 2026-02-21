@@ -95,10 +95,14 @@ async def record_decision(symbol, action, confidence, reasoning, indicators):
         await db.commit()
 
 
-async def record_snapshot(cash, positions):
+async def record_snapshot(cash, positions, live_prices=None):
     """Save a portfolio snapshot for P&L chart."""
     async with aiosqlite.connect(DB_PATH) as db:
-        positions_value = sum(p["quantity"] * p["last_price"] for p in positions.values())
+        live_prices = live_prices or {}
+        positions_value = sum(
+            p["quantity"] * live_prices.get(sym, p["last_price"])
+            for sym, p in positions.items()
+        )
         total_value = cash + positions_value
         # Calculate total P&L vs last snapshot
         prev = await (await db.execute(
