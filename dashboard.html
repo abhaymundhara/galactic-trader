@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Galactic Trader</title>
+<style>
+  :root{--bg:#0d1117;--card:#161b22;--border:#30363d;--green:#3fb950;--red:#f85149;--yellow:#e3b341;--blue:#58a6ff;--text:#c9d1d9;--dim:#8b949e;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:'SF Mono',Consolas,monospace;font-size:13px;}
+  header{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;}
+  header h1{font-size:18px;color:var(--blue);}
+  .badge{padding:3px 8px;border-radius:12px;font-size:11px;font-weight:600;}
+  .badge.running{background:#1a3a1a;color:var(--green);}
+  .badge.idle{background:#1a2a3a;color:var(--dim);}
+  .badge.analysing{background:#2a2a1a;color:var(--yellow);}
+  main{padding:20px 24px;display:grid;gap:16px;}
+  .row{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;}
+  .card h3{font-size:11px;color:var(--dim);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;}
+  .stat{font-size:26px;font-weight:700;}
+  .stat.green{color:var(--green);}
+  .stat.red{color:var(--red);}
+  .sub{font-size:11px;color:var(--dim);margin-top:4px;}
+  canvas{width:100%!important;height:200px!important;}
+  table{width:100%;border-collapse:collapse;}
+  th{text-align:left;color:var(--dim);font-size:11px;text-transform:uppercase;padding:6px 8px;border-bottom:1px solid var(--border);}
+  td{padding:6px 8px;border-bottom:1px solid #21262d;vertical-align:top;}
+  .buy{color:var(--green);}
+  .sell{color:var(--red);}
+  .hold{color:var(--dim);}
+  .conf{font-size:11px;color:var(--dim);}
+  .reasoning{font-size:11px;color:var(--dim);max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pill{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600;}
+  .pill.buy{background:#1a3a1a;color:var(--green);}
+  .pill.sell{background:#3a1a1a;color:var(--red);}
+  .pill.hold{background:#2a2a2a;color:var(--dim);}
+  #week-bar{display:flex;gap:6px;align-items:center;}
+  .week-dot{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid var(--border);color:var(--dim);}
+  .week-dot.active{border-color:var(--blue);color:var(--blue);}
+  .week-dot.done{background:#1a3a1a;border-color:var(--green);color:var(--green);}
+</style>
+</head>
+<body>
+<header>
+  <h1>🪐 Galactic Trader</h1>
+  <span class="badge idle" id="status-badge">idle</span>
+  <span id="model-label" style="color:var(--dim);font-size:11px;"></span>
+  <span style="margin-left:auto;color:var(--dim);font-size:11px;" id="last-update">—</span>
+</header>
+<main>
+  <!-- Stats row -->
+  <div class="row">
+    <div class="card">
+      <h3>Portfolio Value</h3>
+      <div class="stat" id="total-value">$—</div>
+      <div class="sub" id="pnl-sub">—</div>
+    </div>
+    <div class="card">
+      <h3>Cash</h3>
+      <div class="stat" id="cash">$—</div>
+    </div>
+    <div class="card">
+      <h3>Positions Value</h3>
+      <div class="stat" id="pos-value">$—</div>
+    </div>
+    <div class="card">
+      <h3>Experiment Week</h3>
+      <div style="margin-top:6px;" id="week-bar">
+        ${''.join([f'<div class="week-dot" id="w{i}">{i}</div>' for i in range(1,7)])}
+      </div>
+    </div>
+  </div>
+
+  <!-- P&L chart -->
+  <div class="card">
+    <h3>Portfolio Value Over Time</h3>
+    <canvas id="pnl-chart"></canvas>
+  </div>
+
+  <!-- Decisions & Positions -->
+  <div class="row" style="grid-template-columns:1fr 1fr;">
+    <div class="card">
+      <h3>Latest AI Decisions</h3>
+      <table>
+        <thead><tr><th>Symbol</th><th>Action</th><th>Conf</th><th>Reasoning</th></tr></thead>
+        <tbody id="decisions-table"><tr><td colspan="4" style="color:var(--dim)">Waiting for decisions…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Open Positions</h3>
+      <table>
+        <thead><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Last</th><th>P&L</th></tr></thead>
+        <tbody id="positions-table"><tr><td colspan="5" style="color:var(--dim)">No open positions</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Trade log -->
+  <div class="card">
+    <h3>Trade Log</h3>
+    <table>
+      <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Value</th><th>Reason</th></tr></thead>
+      <tbody id="trades-table"><tr><td colspan="7" style="color:var(--dim)">No trades yet</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+const ws = new WebSocket(`ws://${location.host}/ws`);
+let chart = null;
+let startVal = null;
+
+function fmt(n){return '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fmtPct(diff,base){const p=(diff/base*100).toFixed(2);return (diff>=0?'+':'')+ fmt(diff)+' ('+p+'%)';}
+function timeAgo(ts){const d=new Date(ts+'Z');return d.toLocaleTimeString();}
+
+ws.onmessage=(e)=>{
+  const d=JSON.parse(e.data);
+  if(d.type!=='state') return;
+
+  // Status badge
+  const badge=document.getElementById('status-badge');
+  badge.className='badge '+d.status;
+  badge.textContent=d.status;
+
+  // Stats
+  document.getElementById('total-value').textContent=fmt(d.total_value);
+  document.getElementById('cash').textContent=fmt(d.cash);
+  document.getElementById('pos-value').textContent=fmt(d.positions_value);
+  document.getElementById('last-update').textContent='Updated '+new Date().toLocaleTimeString();
+
+  if(!startVal) startVal=d.total_value;
+  const diff=d.total_value-startVal;
+  const sub=document.getElementById('pnl-sub');
+  sub.textContent=fmtPct(diff,startVal);
+  sub.style.color=diff>=0?'var(--green)':(diff<0?'var(--red)':'var(--dim)');
+
+  // Week dots
+  for(let i=1;i<=6;i++){
+    const dot=document.getElementById('w'+i);
+    dot.className='week-dot'+(i<d.week?' done':i===d.week?' active':'');
+  }
+
+  // Decisions table
+  const dec=d.last_decisions||{};
+  const decRows=Object.entries(dec).map(([sym,v])=>`
+    <tr>
+      <td>${sym}</td>
+      <td><span class="pill ${v.action}">${v.action.toUpperCase()}</span></td>
+      <td class="conf">${(v.confidence*100).toFixed(0)}%</td>
+      <td class="reasoning" title="${v.reasoning}">${v.reasoning}</td>
+    </tr>`).join('');
+  document.getElementById('decisions-table').innerHTML=decRows||'<tr><td colspan="4" style="color:var(--dim)">Waiting…</td></tr>';
+
+  // Positions table
+  const pos=d.positions||{};
+  const posRows=Object.entries(pos).filter(([s,p])=>p.quantity>0).map(([sym,p])=>{
+    const last=p.last_price||p.avg_cost;
+    const pnl=(last-p.avg_cost)*p.quantity;
+    const pnlColor=pnl>=0?'var(--green)':(pnl<0?'var(--red)':'var(--dim)');
+    return `<tr><td>${sym}</td><td>${p.quantity}</td><td>${fmt(p.avg_cost)}</td><td>${fmt(last)}</td><td style="color:${pnlColor}">${fmt(pnl)}</td></tr>`;
+  }).join('');
+  document.getElementById('positions-table').innerHTML=posRows||'<tr><td colspan="5" style="color:var(--dim)">No open positions</td></tr>';
+};
+
+// Fetch trade log on load and every 30s
+async function loadTrades(){
+  const r=await fetch('/api/trades?limit=20');
+  const trades=await r.json();
+  const rows=trades.map(t=>`<tr>
+    <td>${timeAgo(t.timestamp)}</td>
+    <td>${t.symbol}</td>
+    <td class="${t.side}">${t.side.toUpperCase()}</td>
+    <td>${t.quantity}</td>
+    <td>${fmt(t.price)}</td>
+    <td>${fmt(t.value)}</td>
+    <td class="reasoning" title="${t.reason||''}">${t.reason||'—'}</td>
+  </tr>`).join('');
+  document.getElementById('trades-table').innerHTML=rows||'<tr><td colspan="7" style="color:var(--dim)">No trades yet</td></tr>';
+}
+
+// P&L chart
+async function loadChart(){
+  const r=await fetch('/api/snapshots?limit=200');
+  const snaps=await r.json();
+  if(!snaps.length) return;
+  const labels=snaps.map(s=>new Date(s.timestamp+'Z').toLocaleTimeString());
+  const values=snaps.map(s=>s.total_value);
+  const ctx=document.getElementById('pnl-chart').getContext('2d');
+  if(chart) chart.destroy();
+  chart=new Chart(ctx,{
+    type:'line',
+    data:{labels,datasets:[{label:'Portfolio Value',data:values,borderColor:'#58a6ff',backgroundColor:'rgba(88,166,255,0.08)',fill:true,tension:0.3,pointRadius:0,borderWidth:2}]},
+    options:{
+      animation:false,responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:'#8b949e',maxTicksLimit:8},grid:{color:'#21262d'}},
+        y:{ticks:{color:'#8b949e',callback:v=>'$'+v.toLocaleString()},grid:{color:'#21262d'}}
+      }
+    }
+  });
+}
+
+// Fetch status for model label
+fetch('/api/status').then(r=>r.json()).then(s=>{
+  document.getElementById('model-label').textContent='model: '+s.model;
+});
+
+loadTrades();
+loadChart();
+setInterval(loadTrades, 30000);
+setInterval(loadChart, 60000);
+</script>
+</body>
+</html>
