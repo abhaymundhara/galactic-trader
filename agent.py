@@ -725,7 +725,7 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     high = pd.to_numeric(df["high"], errors="coerce")
     low = pd.to_numeric(df["low"], errors="coerce")
     close = pd.to_numeric(df["close"], errors="coerce")
-    volume = pd.to_numeric(df.get("volume", 0), errors="coerce").fillna(0.0)
+    volume = pd.to_numeric(df.get("volume", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
     if high.isna().iloc[-1] or low.isna().iloc[-1] or close.isna().iloc[-1]:
         return {}
 
