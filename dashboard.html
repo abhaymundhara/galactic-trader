@@ -374,6 +374,11 @@
         width: 100% !important;
         height: 200px !important;
       }
+      #monthly-chart,
+      #cumulative-chart {
+        width: 100% !important;
+        height: 180px !important;
+      }
 
       /* TWO COL */
       .two-col {
@@ -625,6 +630,35 @@
         color: var(--text-4);
       }
 
+      .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+      .kpi {
+        border: 1px solid var(--border-light);
+        border-radius: 6px;
+        padding: 10px;
+      }
+      .kpi .k {
+        font-size: 10px;
+        color: var(--text-4);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .kpi .v {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--text);
+        margin-top: 3px;
+      }
+      .kpi .v.up {
+        color: var(--green);
+      }
+      .kpi .v.dn {
+        color: var(--red);
+      }
+
       /* SCROLLBAR */
       ::-webkit-scrollbar {
         width: 4px;
@@ -856,6 +890,80 @@
               </table>
             </div>
           </div>
+
+          <!-- ANALYTICS -->
+          <div class="two-col" id="analytics">
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">Overall Performance</span>
+                <span class="card-sub">Realized trade analytics</span>
+              </div>
+              <div class="card-body">
+                <div class="kpi-grid">
+                  <div class="kpi">
+                    <div class="k">Net Realized</div>
+                    <div class="v" id="k-net">$—</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="k">Gross Profit</div>
+                    <div class="v up" id="k-gp">$—</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="k">Gross Loss</div>
+                    <div class="v dn" id="k-gl">$—</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="k">Win Rate</div>
+                    <div class="v" id="k-winrate">—</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="k">Profit Factor</div>
+                    <div class="v" id="k-pf">—</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="k">Max Drawdown</div>
+                    <div class="v dn" id="k-mdd">—</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="k">Closed Trades</div>
+                    <div class="v" id="k-closed">—</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="k">Avg Win / Loss</div>
+                    <div class="v" id="k-awal">—</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="k">Expectancy</div>
+                    <div class="v" id="k-exp">—</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">Return Curves</span>
+                <span class="card-sub">Monthly and cumulative</span>
+              </div>
+              <div
+                class="card-body"
+                style="display: flex; flex-direction: column; gap: 14px"
+              >
+                <div>
+                  <div class="section-meta" style="margin-bottom: 6px">
+                    Monthly Return
+                  </div>
+                  <canvas id="monthly-chart"></canvas>
+                </div>
+                <div>
+                  <div class="section-meta" style="margin-bottom: 6px">
+                    Cumulative Profit
+                  </div>
+                  <canvas id="cumulative-chart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
         <!-- /content -->
       </div>
@@ -869,6 +977,8 @@
       let ws = null;
       let wsRetryMs = 1000;
       let chart = null;
+      let monthlyChart = null;
+      let cumulativeChart = null;
       let startVal = null;
       let feedItems = [];
       let baselineVal = null;
@@ -1209,6 +1319,127 @@
         });
       }
 
+      async function loadAnalytics() {
+        const r = await fetch("/api/analytics");
+        const a = await r.json();
+
+        document.getElementById("k-net").textContent = fmt(a.net_realized || 0);
+        document.getElementById("k-net").className =
+          "v " + ((a.net_realized || 0) >= 0 ? "up" : "dn");
+        document.getElementById("k-gp").textContent = fmt(a.gross_profit || 0);
+        document.getElementById("k-gl").textContent = fmt(a.gross_loss || 0);
+        document.getElementById("k-winrate").textContent =
+          `${num(a.win_rate, 0).toFixed(1)}%`;
+        document.getElementById("k-pf").textContent =
+          a.profit_factor == null ? "—" : num(a.profit_factor, 0).toFixed(2);
+        document.getElementById("k-mdd").textContent =
+          `${num(a.max_drawdown_pct, 0).toFixed(2)}%`;
+        document.getElementById("k-closed").textContent =
+          `${a.closed_trades || 0} (${a.wins || 0}W/${a.losses || 0}L)`;
+        document.getElementById("k-awal").textContent =
+          `${fmt(a.avg_win || 0)} / ${fmt(a.avg_loss || 0)}`;
+        document.getElementById("k-exp").textContent = fmt(a.expectancy || 0);
+        document.getElementById("k-exp").className =
+          "v " + ((a.expectancy || 0) >= 0 ? "up" : "dn");
+
+        const mctx = document.getElementById("monthly-chart").getContext("2d");
+        if (monthlyChart) monthlyChart.destroy();
+        monthlyChart = new Chart(mctx, {
+          type: "bar",
+          data: {
+            labels: (a.monthly && a.monthly.labels) || [],
+            datasets: [
+              {
+                label: "Monthly Return",
+                data: (a.monthly && a.monthly.values) || [],
+                backgroundColor: ((a.monthly && a.monthly.values) || []).map(
+                  (v) =>
+                    v >= 0 ? "rgba(22,163,74,0.75)" : "rgba(220,38,38,0.75)",
+                ),
+                borderWidth: 0,
+              },
+            ],
+          },
+          options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: {
+                ticks: {
+                  color: "#9ca3af",
+                  font: { size: 10, family: "Inter" },
+                },
+                grid: { color: "#f3f4f6" },
+              },
+              y: {
+                ticks: {
+                  color: "#9ca3af",
+                  callback: (v) => "$" + Number(v).toLocaleString(),
+                  font: { size: 10, family: "Inter" },
+                },
+                grid: { color: "#f3f4f6" },
+              },
+            },
+          },
+        });
+
+        const cctx = document
+          .getElementById("cumulative-chart")
+          .getContext("2d");
+        const cumVals = (a.cumulative && a.cumulative.values) || [];
+        const cumLabels = ((a.cumulative && a.cumulative.labels) || []).map(
+          shortTime,
+        );
+        const up = cumVals.length ? cumVals[cumVals.length - 1] >= 0 : true;
+        if (cumulativeChart) cumulativeChart.destroy();
+        cumulativeChart = new Chart(cctx, {
+          type: "line",
+          data: {
+            labels: cumLabels,
+            datasets: [
+              {
+                label: "Cumulative",
+                data: cumVals,
+                borderColor: up ? "#16a34a" : "#dc2626",
+                backgroundColor: up
+                  ? "rgba(22,163,74,0.06)"
+                  : "rgba(220,38,38,0.06)",
+                fill: true,
+                tension: 0.25,
+                pointRadius: 0,
+                borderWidth: 1.5,
+              },
+            ],
+          },
+          options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: {
+                ticks: {
+                  color: "#9ca3af",
+                  maxTicksLimit: 6,
+                  font: { size: 10, family: "Inter" },
+                },
+                grid: { color: "#f3f4f6" },
+              },
+              y: {
+                ticks: {
+                  color: "#9ca3af",
+                  callback: (v) => "$" + Number(v).toLocaleString(),
+                  font: { size: 10, family: "Inter" },
+                },
+                grid: { color: "#f3f4f6" },
+              },
+            },
+          },
+        });
+      }
+
       fetch("/api/status")
         .then((r) => r.json())
         .then((s) => {
@@ -1217,8 +1448,10 @@
 
       loadTrades();
       loadChart();
+      loadAnalytics();
       setInterval(loadTrades, 15000);
       setInterval(loadChart, 30000);
+      setInterval(loadAnalytics, 30000);
     </script>
   </body>
 </html>
