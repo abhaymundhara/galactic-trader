@@ -458,7 +458,7 @@ async def run_agent():
             await analyse_symbol(symbol)
             await asyncio.sleep(1)
 
-        snapshot = await db.record_snapshot(state["cash"], state["positions"])
+        snapshot = await db.record_snapshot(state["cash"], state["positions"], state["last_prices"])
         state["status"]  = "idle"
         loop_count      += 1
         state["week"]    = min(6, 1 + loop_count // 2016)
