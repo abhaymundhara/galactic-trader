@@ -1,5 +1,6 @@
 """Galactic Trader — FastAPI app + WebSocket dashboard."""
 import asyncio
+import math
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -42,6 +43,29 @@ def _safe_remove_client(ws: WebSocket):
         clients.remove(ws)
 
 
+def _safe_num(value, fallback: float = 0.0) -> float:
+    try:
+        n = float(value)
+        if math.isfinite(n):
+            return n
+    except Exception:
+        pass
+    return fallback
+
+
+def _json_safe(value):
+    """Recursively sanitize payload values so websocket JSON never fails serialization."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 async def broadcast(data: dict):
     dead = []
     for ws in clients:
@@ -68,29 +92,24 @@ async def websocket_endpoint(websocket: WebSocket):
                     if p.get("quantity", 0) > 0
                 ]
 
-                # Best-effort only. Never fail websocket updates due to price refresh issues.
-                try:
-                    await agent.refresh_live_prices([p["symbol"] for p in portfolio])
-                except Exception:
-                    pass
-
                 positions_value = sum(
-                    float(p.get("quantity", 0) or 0)
-                    * float(agent.state["last_prices"].get(p["symbol"], p.get("last_price", 0)) or 0)
+                    _safe_num(p.get("quantity", 0), 0.0)
+                    * _safe_num(agent.state["last_prices"].get(p["symbol"], p.get("last_price", 0)), 0.0)
                     for p in portfolio
                 )
                 unrealized_pnl = sum(
                     (
-                        float(agent.state["last_prices"].get(p["symbol"], p.get("last_price", 0)) or 0)
-                        - float(p.get("avg_cost", 0) or 0)
+                        _safe_num(agent.state["last_prices"].get(p["symbol"], p.get("last_price", 0)), 0.0)
+                        - _safe_num(p.get("avg_cost", 0), 0.0)
                     )
-                    * float(p.get("quantity", 0) or 0)
+                    * _safe_num(p.get("quantity", 0), 0.0)
                     for p in portfolio
                 )
-                total_value = float(agent.state.get("cash", 0) or 0) + positions_value
+                cash = _safe_num(agent.state.get("cash", 0), 0.0)
+                total_value = cash + positions_value
                 payload = {
                     "type": "state",
-                    "cash": round(float(agent.state.get("cash", 0) or 0), 2),
+                    "cash": round(cash, 2),
                     "total_value": round(total_value, 2),
                     "positions_value": round(positions_value, 2),
                     "unrealized_pnl": round(unrealized_pnl, 2),
@@ -99,9 +118,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     "last_decisions": agent.state.get("last_decision", {}) or {},
                     "positions": agent.state.get("positions", {}) or {},
                 }
-                await websocket.send_json(payload)
-            except Exception:
+                await websocket.send_json(_json_safe(payload))
+            except Exception as ex:
                 # Keep the socket alive and retry on next tick.
+                print(f"WebSocket tick failed: {ex}")
                 continue
     except WebSocketDisconnect:
         _safe_remove_client(websocket)
