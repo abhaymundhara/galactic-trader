@@ -109,8 +109,11 @@ async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
     auth  = {"APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET}
 
     if is_crypto(symbol):
-        url = f"{DATA_BASE}/crypto/us/{symbol}/bars"
+        # BTC/USD contains a slash — it breaks URL path routing (404).
+        # Correct endpoint: GET /v2/crypto/us/bars?symbols=BTC%2FUSD
+        url = f"{DATA_BASE}/crypto/us/bars"
         params = {
+            "symbols":   symbol,   # httpx URL-encodes the slash automatically
             "timeframe": "1Min",
             "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end":   end.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -134,7 +137,14 @@ async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
     if r.status_code != 200:
         print(f"Bars fetch failed for {symbol}: {r.status_code} {r.text[:200]}")
         return pd.DataFrame()
-    raw = r.json().get("bars", [])
+    resp_json = r.json()
+    bars_data = resp_json.get("bars", {})
+    # Multi-symbol crypto endpoint → {"bars": {"BTC/USD": [...]}}
+    # Single-symbol stock endpoint → {"bars": [...]}
+    if isinstance(bars_data, dict):
+        raw = bars_data.get(symbol, [])
+    else:
+        raw = bars_data
     if not raw:
         return pd.DataFrame()
     df = pd.DataFrame(raw)
