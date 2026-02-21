@@ -400,6 +400,9 @@ def normalize_symbol(symbol: str) -> str:
         "BTCUSD": "BTC/USD",
         "ETHUSD": "ETH/USD",
         "SOLUSD": "SOL/USD",
+        "DOGEUSD": "DOGE/USD",
+        "XRPUSD": "XRP/USD",
+        "USDTUSD": "USDT/USD",
         "BTCUSDT": "BTC/USDT",
         "ETHUSDT": "ETH/USDT",
         "XRPUSDT": "XRP/USDT",
@@ -432,6 +435,47 @@ def _normalize_position_qty(raw_qty: Any, side: str) -> float:
     if side_norm == "short":
         qty = abs(qty)
     return qty if qty > 0 else 0.0
+
+
+def split_pair(symbol: str) -> tuple[str, str]:
+    s = normalize_symbol(symbol)
+    if "/" not in s:
+        return s, ""
+    base, quote = s.split("/", 1)
+    return base, quote
+
+
+def get_asset_balance_units(asset: str) -> float:
+    """Approximate units held for a base asset (e.g., USDT from USDT/USD position)."""
+    asset_u = (asset or "").upper()
+    if not asset_u:
+        return 0.0
+    total = 0.0
+    for sym, pos in state.get("positions", {}).items():
+        qty = float(pos.get("quantity", 0) or 0)
+        if qty <= 0:
+            continue
+        base, _ = split_pair(sym)
+        if base.upper() == asset_u:
+            total += qty
+    return total
+
+
+def entry_quote_balance_ok(symbol: str, action: str) -> tuple[bool, str]:
+    """For quote-funded crypto pairs (e.g., */USDT), require quote balance before buys."""
+    if action != "buy" or not is_crypto(symbol):
+        return True, "ok"
+    base, quote = split_pair(symbol)
+    if not quote or quote.upper() == "USD":
+        return True, "ok"
+    quote_balance = get_asset_balance_units(quote)
+    if quote_balance <= 0:
+        return (
+            False,
+            f"{symbol} buy blocked: insufficient {quote} balance (requires quote-funded buy). "
+            f"Use {base}/USD or hold {quote}.",
+        )
+    return True, "ok"
 
 
 def should_analyse_symbol(symbol: str, stock_market_open: bool) -> bool:
@@ -1229,6 +1273,12 @@ async def analyse_symbol(symbol: str):
     # Market-hours guard for stock entries.
     if action in ("buy", "short"):
         ok, why_not = entry_market_open_ok(symbol)
+        if not ok:
+            action = "hold"
+            confidence = 0.0
+            reasoning = why_not
+    if action == "buy":
+        ok, why_not = entry_quote_balance_ok(symbol, action)
         if not ok:
             action = "hold"
             confidence = 0.0
