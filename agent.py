@@ -142,6 +142,37 @@ def update_daily_risk_state(equity_now: float):
         state["halt_new_entries"] = True
 
 
+def apply_trailing_stop(symbol: str, price: float):
+    """Ratchet stop-loss upward as a position moves into profit (trailing stop)."""
+    pos = state["positions"].get(symbol)
+    if not pos or pos.get("quantity", 0) <= 0:
+        return
+    avg_cost = float(pos.get("avg_cost", 0) or 0)
+    sl       = float(pos.get("stop_loss", 0) or 0)
+    atr      = float(
+        state["last_decision"].get(symbol, {}).get("indicators", {}).get("atr", 0) or 0
+    )
+    if avg_cost <= 0 or atr <= 0 or price <= avg_cost:
+        return  # Only trail when the position is in profit
+
+    gain   = price - avg_cost
+    new_sl = sl
+
+    # Step 1 — Move SL to breakeven once up 1x ATR.
+    if gain >= atr and sl < avg_cost:
+        new_sl = round(avg_cost * 1.001, 4)  # entry + 0.1% buffer
+
+    # Step 2 — Trail at ATR_SL_MULT x ATR below current price once up 2x ATR.
+    if gain >= 2 * atr:
+        trail = round(price - ATR_SL_MULT * atr, 4)
+        if trail > new_sl:
+            new_sl = trail
+
+    if new_sl > sl:
+        pos["stop_loss"] = new_sl
+        print(f"📈 Trail SL {symbol}: ${sl:.4f} → ${new_sl:.4f}  (price ${price:.4f})")
+
+
 def infer_regime(indicators: dict, higher_tf: dict | None) -> str:
     adx = float(indicators.get("adx", 0) or 0)
     bb_width = float(indicators.get("bb_width", 0) or 0)
@@ -152,10 +183,14 @@ def infer_regime(indicators: dict, higher_tf: dict | None) -> str:
 
 
 def buy_filters_ok(indicators: dict, higher_tf: dict | None) -> tuple[bool, str]:
-    price = float(indicators.get("price", 0) or 0)
-    vwap = float(indicators.get("vwap", 0) or 0)
+    price     = float(indicators.get("price", 0) or 0)
+    vwap      = float(indicators.get("vwap", 0) or 0)
     vol_ratio = float(indicators.get("volume_ratio", 0) or 0)
-    h_cross = (higher_tf or {}).get("ema_cross", "unknown")
+    h_cross   = (higher_tf or {}).get("ema_cross", "unknown")
+    rsi       = float(indicators.get("rsi", 50) or 50)
+    macd_val  = float(indicators.get("macd", 0) or 0)
+    macd_sig  = float(indicators.get("macd_signal", 0) or 0)
+    adx       = float(indicators.get("adx", 0) or 0)
 
     if vwap > 0 and price < vwap:
         return False, "price below VWAP"
@@ -163,6 +198,14 @@ def buy_filters_ok(indicators: dict, higher_tf: dict | None) -> tuple[bool, str]
         return False, f"low volume ratio {vol_ratio:.2f}"
     if h_cross != "bullish":
         return False, "higher-timeframe trend not bullish"
+    if rsi > 65:
+        return False, f"RSI overbought ({rsi:.1f} > 65)"
+    if rsi < 35:
+        return False, f"RSI too weak / downtrend ({rsi:.1f} < 35)"
+    if macd_val < macd_sig:
+        return False, f"MACD bearish (macd {macd_val:.4f} < signal {macd_sig:.4f})"
+    if adx < 15:
+        return False, f"ADX too low — no trend strength ({adx:.1f} < 15)"
     return True, "ok"
 STARTING_CAP  = float(os.getenv("STARTING_CAPITAL", "10000"))
 
@@ -179,6 +222,7 @@ state = {
     "risk_day": datetime.utcnow().strftime("%Y-%m-%d"),
     "daily_start_equity": STARTING_CAP,
     "halt_new_entries": False,
+    "loss_streak": {},   # symbol -> consecutive closed losses; >=2 triggers cooldown
 }
 
 # Auth headers for all Alpaca calls
@@ -578,14 +622,15 @@ Indicators:
 - Market regime: {regime}
 Position: {pos_text}
 
-Rules:
-1. Max 10% portfolio per position total (pyramiding allowed — buy more if position < 10%)
-2. Every BUY must include stop_loss (2-3% below entry) and take_profit (4-6% above entry)
-3. If holding and price hits or breaches stop_loss → action: sell
-4. If holding and price hits or exceeds take_profit → action: sell
-5. No buy if RSI>72; no sell-short if RSI<28
-6. Prefer EMA crossover confirmation before entering
-7. High conviction only — confidence<0.65 = hold
+Rules (strictly enforced):
+1. Pyramid ONLY if price > avg_cost — never add to a losing position
+2. Every BUY: stop_loss 1.5–2.5% below entry, take_profit ≥ 3% above entry (minimum 2:1 R:R)
+3. RSI entry zone 35–65 only — avoid overbought (>65) and weak/downtrend (<35) conditions
+4. MACD must be above or crossing its signal line to confirm bullish momentum before buying
+5. ADX > 18 confirms trend strength; skip buy if ADX < 15 (choppy/no-trend market)
+6. Price must be at or above VWAP to confirm bullish session bias
+7. Auto-exit: price ≤ stop_loss → sell; price ≥ take_profit AND net P&L > 0 → sell
+8. High conviction only — confidence < 0.65 = hold; only the clearest, highest-quality setups
 
 Respond with ONLY valid JSON, no markdown:
 {{"action":"buy"|"sell"|"hold","confidence":0.0-1.0,"reasoning":"one sentence","stop_loss":0.0,"take_profit":0.0}}
@@ -677,6 +722,14 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
     max_spend = max(0, portfolio_value * MAX_POS - current_pos_value)
 
     if action == "buy":
+        # Never pyramid into an underwater position.
+        existing = state["positions"].get(symbol, {})
+        if existing.get("quantity", 0) > 0:
+            avg_c = float(existing.get("avg_cost", price) or price)
+            if price < avg_c * 0.998:  # position losing by >0.2%
+                print(f"⚠️  Pyramid blocked {symbol}: price ${price:.4f} < avg ${avg_c:.4f}")
+                return
+
         if is_crypto(symbol):
             quantity = round(max_spend / price, 6)
             if quantity <= 0 or state["cash"] < price * 0.001:
@@ -757,6 +810,13 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         state["positions"][symbol]["take_profit"] = 0.0
         await db.record_trade(symbol, "sell", quantity, price, reason, stop_loss=0.0, take_profit=0.0, fees=sell_fees)
         print(f"🔴 SELL {quantity} {symbol} @ ${price:.4f} | fees: ${sell_fees:.4f} | {reason}")
+        # Track per-symbol consecutive loss streak for cooldown.
+        avg_c    = float(pos.get("avg_cost", price) or price)
+        net_sell = (price - avg_c) * quantity - sell_fees
+        if net_sell < 0:
+            state["loss_streak"][symbol] = state["loss_streak"].get(symbol, 0) + 1
+        else:
+            state["loss_streak"][symbol] = 0
 
 
 async def analyse_symbol(symbol: str):
@@ -782,6 +842,10 @@ async def analyse_symbol(symbol: str):
     state["last_prices"][symbol] = price
     if symbol in state["positions"]:
         state["positions"][symbol]["last_price"] = price
+
+    # Ratchet trailing stops before the SL/TP check so fresh levels are applied.
+    if ADD_ALL_FIVE:
+        apply_trailing_stop(symbol, price)
 
     # Fast-path: check stop-loss / take-profit before burning LLM tokens
     forced_exit = check_stop_take(symbol, price)
@@ -835,6 +899,14 @@ async def analyse_symbol(symbol: str):
             confidence = 0.0
             reasoning = "Regime=range; buy only on deeper pullback (RSI<=40)"
 
+    # Per-symbol consecutive loss cooldown: pause buys after >=2 straight losses.
+    if ADD_ALL_FIVE and action == "buy":
+        streak = state.get("loss_streak", {}).get(symbol, 0)
+        if streak >= 2:
+            action = "hold"
+            confidence = 0.0
+            reasoning = f"Loss cooldown: {streak} consecutive losses on {symbol} — wait for fresh setup"
+
     state["last_decision"][symbol] = {
         "action": action, "confidence": confidence,
         "reasoning": reasoning, "indicators": indicators,
@@ -846,7 +918,7 @@ async def analyse_symbol(symbol: str):
 
     await db.record_decision(symbol, action, confidence, reasoning, indicators)
 
-    if confidence >= 0.65 and action in ("buy", "sell"):
+    if confidence >= 0.70 and action in ("buy", "sell"):
         await execute_paper_trade(symbol, action, price, reasoning, stop_loss, take_profit)
 
 

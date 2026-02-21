@@ -1320,8 +1320,15 @@
       }
 
       async function loadAnalytics() {
-        const r = await fetch("/api/analytics");
-        const a = await r.json();
+        let a;
+        try {
+          const r = await fetch("/api/analytics");
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          a = await r.json();
+        } catch (err) {
+          console.warn("loadAnalytics failed:", err);
+          return;
+        }
 
         document.getElementById("k-net").textContent = fmt(a.net_realized || 0);
         document.getElementById("k-net").className =

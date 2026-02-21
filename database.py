@@ -9,10 +9,13 @@ DB_PATH = "trader.db"
 def normalize_symbol(symbol: str) -> str:
     s = (symbol or "").strip().upper()
     aliases = {
-        "BTCUSD": "BTC/USD",
-        "ETHUSD": "ETH/USD",
-        "BTCUSDT": "BTC/USDT",
-        "ETHUSDT": "ETH/USDT",
+        "BTCUSD":   "BTC/USD",
+        "ETHUSD":   "ETH/USD",
+        "SOLUSD":   "SOL/USD",
+        "BTCUSDT":  "BTC/USDT",
+        "ETHUSDT":  "ETH/USDT",
+        "XRPUSDT":  "XRP/USDT",
+        "DOGEUSDT": "DOGE/USDT",
     }
     return aliases.get(s, s)
 

@@ -197,7 +197,8 @@ async def api_analytics():
     trades = list(reversed(trades))
 
     lots: dict[str, list[dict]] = defaultdict(list)
-    realized: list[float] = []
+    # Each entry: {pnl, timestamp} — keeps timestamps so charts match the KPIs.
+    realized: list[dict] = []
 
     for t in trades:
         symbol = t.get("symbol")
@@ -207,7 +208,8 @@ async def api_analytics():
             continue
 
         value = _safe_num(t.get("value", 0), 0.0)
-        fees = _safe_num(t.get("fees", 0), 0.0)
+        fees  = _safe_num(t.get("fees", 0), 0.0)
+        ts    = t.get("timestamp", "")
 
         if side == "buy":
             unit_cost = (value + fees) / qty if qty > 0 else 0.0
@@ -225,36 +227,34 @@ async def api_analytics():
                 if lot["qty"] <= 1e-12:
                     lots[symbol].pop(0)
 
-            # If historical buys are missing (e.g. imported position), fallback to break-even for unmatched qty.
+            # Fallback for unmatched qty (imported / missing buy records).
             if remaining > 1e-12:
                 est_unit = (value / qty) if qty > 0 else 0.0
                 cost_basis += remaining * est_unit
 
             pnl = value - fees - cost_basis
-            realized.append(pnl)
+            realized.append({"pnl": pnl, "timestamp": ts, "symbol": symbol})
 
-    gross_profit = sum(p for p in realized if p > 0)
-    gross_loss = sum(p for p in realized if p < 0)
-    net_realized = sum(realized)
-    wins = sum(1 for p in realized if p > 0)
-    losses = sum(1 for p in realized if p < 0)
-    closed_trades = len(realized)
-    win_rate = (wins / closed_trades * 100.0) if closed_trades else 0.0
-    avg_win = (gross_profit / wins) if wins else 0.0
-    avg_loss = (abs(gross_loss) / losses) if losses else 0.0
-    expectancy = (net_realized / closed_trades) if closed_trades else 0.0
-    profit_factor = (gross_profit / abs(gross_loss)) if gross_loss < 0 else None
+    realized_pnl   = [r["pnl"] for r in realized]
+    gross_profit   = sum(p for p in realized_pnl if p > 0)
+    gross_loss     = sum(p for p in realized_pnl if p < 0)
+    net_realized   = sum(realized_pnl)
+    wins           = sum(1 for p in realized_pnl if p > 0)
+    losses         = sum(1 for p in realized_pnl if p < 0)
+    closed_trades  = len(realized_pnl)
+    win_rate       = (wins / closed_trades * 100.0) if closed_trades else 0.0
+    avg_win        = (gross_profit / wins) if wins else 0.0
+    avg_loss       = (abs(gross_loss) / losses) if losses else 0.0
+    expectancy     = (net_realized / closed_trades) if closed_trades else 0.0
+    profit_factor  = (gross_profit / abs(gross_loss)) if gross_loss < 0 else None
 
+    # Max drawdown stays equity-based (standard definition: peak-to-trough of total portfolio value).
     max_drawdown_pct = 0.0
-    month_end: dict[str, float] = {}
-    month_first_value = None
     peak = None
-    cumulative_labels = []
-    cumulative_values = []
-
     for s in snaps:
         tv = _safe_num(s.get("total_value", 0), 0.0)
-        ts = s.get("timestamp", "")
+        if tv <= 0:
+            continue
         if peak is None or tv > peak:
             peak = tv
         if peak and peak > 0:
@@ -262,23 +262,22 @@ async def api_analytics():
             if dd > max_drawdown_pct:
                 max_drawdown_pct = dd
 
-        ym = (ts[:7] if len(ts) >= 7 else "")
-        if ym:
-            month_end[ym] = tv
+    # Cumulative realized P&L series — one point per closed trade, timestamps match KPIs exactly.
+    cumulative_labels: list[str] = []
+    cumulative_values: list[float] = []
+    running = 0.0
+    for r in realized:
+        running += r["pnl"]
+        cumulative_labels.append(r["timestamp"])
+        cumulative_values.append(round(running, 2))
 
-        if month_first_value is None:
-            month_first_value = tv
-
-        cumulative_labels.append(ts)
-        cumulative_values.append(_safe_num(s.get("total_pnl", 0), 0.0))
-
-    monthly_labels = sorted(month_end.keys())
-    monthly_values = []
-    prev = month_first_value if month_first_value is not None else 0.0
-    for m in monthly_labels:
-        v = month_end[m]
-        monthly_values.append(v - prev)
-        prev = v
+    # Monthly realized P&L — group sell trades by month, not equity snapshots.
+    monthly_buckets: dict[str, float] = {}
+    for r in realized:
+        ym = r["timestamp"][:7] if len(r["timestamp"]) >= 7 else "unknown"
+        monthly_buckets[ym] = monthly_buckets.get(ym, 0.0) + r["pnl"]
+    monthly_labels = sorted(monthly_buckets.keys())
+    monthly_values = [monthly_buckets[m] for m in monthly_labels]
 
     return {
         "closed_trades": closed_trades,
@@ -294,7 +293,7 @@ async def api_analytics():
         "profit_factor": (round(profit_factor, 3) if profit_factor is not None else None),
         "max_drawdown_pct": round(max_drawdown_pct, 2),
         "monthly": {"labels": monthly_labels, "values": [round(v, 2) for v in monthly_values]},
-        "cumulative": {"labels": cumulative_labels, "values": [round(v, 2) for v in cumulative_values]},
+        "cumulative": {"labels": cumulative_labels, "values": cumulative_values},
     }
 
 
