@@ -1805,9 +1805,9 @@
       });
 
       // ── Patch onSocketMessage to feed regime/prices into chart ────────────
-      const _origSocketMsg = onSocketMessage;
-      function onSocketMessage(e) {
-        _origSocketMsg(e);
+      const _baseSocketMsg = onSocketMessage;
+      const onSocketMessageWithCharts = (e) => {
+        _baseSocketMsg(e);
         try {
           const d = JSON.parse(e.data);
           if (d.type !== "state") return;
@@ -1821,9 +1821,9 @@
             document.getElementById("chart-last-price").textContent = "$" + d.last_prices[currentChartSymbol].toFixed(4);
           }
         } catch {}
-      }
+      };
       // Re-bind patched handler
-      if (ws) ws.onmessage = onSocketMessage;
+      if (ws) ws.onmessage = onSocketMessageWithCharts;
 
     </script>
   </body>
