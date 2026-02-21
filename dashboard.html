@@ -4,304 +4,398 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Galactic Trader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
-:root{
-  --bg:#060a0f;--bg2:#0b1017;--card:#0e1520;--border:#1a2233;
-  --green:#00ff88;--green2:#00c866;--red:#ff3b5c;--yellow:#ffc843;
-  --blue:#4da6ff;--blue2:#1e6fff;--purple:#a855f7;--cyan:#00e5ff;
-  --text:#e2eaf5;--dim:#4a5568;--dim2:#2d3748;
-  --font:'SF Mono',Consolas,'Fira Code',monospace;
+:root {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  --border-light: #f3f4f6;
+  --text: #111827;
+  --text-2: #374151;
+  --text-3: #6b7280;
+  --text-4: #9ca3af;
+  --red: #dc2626;
+  --red-bg: #fef2f2;
+  --red-border: #fecaca;
+  --green: #16a34a;
+  --green-bg: #f0fdf4;
+  --green-border: #bbf7d0;
+  --yellow: #d97706;
+  --yellow-bg: #fffbeb;
+  --yellow-border: #fde68a;
+  --blue: #2563eb;
+  --blue-bg: #eff6ff;
+  --blue-border: #bfdbfe;
+  --radius: 8px;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
-*{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:12px;overflow-x:hidden;}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; line-height: 1.5; }
 
-/* ── TICKER BAR ─────────────────────────────────────── */
-#ticker-bar{
-  height:32px;background:#070d16;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;overflow:hidden;position:relative;
+/* LAYOUT */
+.app { display: flex; min-height: 100vh; }
+
+/* SIDEBAR */
+.sidebar {
+  width: 220px; flex-shrink: 0;
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
 }
-#ticker-bar::before,#ticker-bar::after{
-  content:'';position:absolute;top:0;width:60px;height:100%;z-index:2;
+.sidebar-logo {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex; align-items: center; gap: 10px;
 }
-#ticker-bar::before{left:0;background:linear-gradient(90deg,#070d16,transparent);}
-#ticker-bar::after{right:0;background:linear-gradient(270deg,#070d16,transparent);}
-#ticker-track{
-  display:flex;gap:40px;white-space:nowrap;
-  animation:ticker 40s linear infinite;
+.logo-mark {
+  width: 28px; height: 28px; border-radius: 6px;
+  background: var(--red); display: flex; align-items: center;
+  justify-content: center; font-size: 14px; flex-shrink: 0;
 }
-@keyframes ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-.ticker-item{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:11px;}
-.ticker-item .sym{color:var(--text);font-weight:700;letter-spacing:.05em;}
-.ticker-item .chg.up{color:var(--green);}
-.ticker-item .chg.dn{color:var(--red);}
+.logo-text { font-size: 13px; font-weight: 700; color: var(--text); letter-spacing: -.01em; }
+.logo-sub { font-size: 10px; color: var(--text-3); margin-top: 1px; }
 
-/* ── HEADER ─────────────────────────────────────────── */
-header{
-  padding:14px 24px;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;gap:16px;
-  background:linear-gradient(180deg,#0a1220,var(--bg));
+.sidebar-section { padding: 16px 12px 8px; }
+.sidebar-section-label { font-size: 10px; font-weight: 600; color: var(--text-4); text-transform: uppercase; letter-spacing: .08em; padding: 0 8px; margin-bottom: 4px; }
+.nav-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 8px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; color: var(--text-3); font-weight: 500;
+  transition: all .15s; text-decoration: none;
 }
-.logo{display:flex;align-items:center;gap:10px;}
-.logo-icon{
-  width:32px;height:32px;border-radius:8px;
-  background:linear-gradient(135deg,var(--blue2),var(--purple));
-  display:flex;align-items:center;justify-content:center;font-size:16px;
+.nav-item:hover { background: var(--bg); color: var(--text-2); }
+.nav-item.active { background: var(--red-bg); color: var(--red); }
+.nav-item .icon { width: 16px; text-align: center; font-size: 14px; flex-shrink: 0; }
+
+.sidebar-footer { margin-top: auto; padding: 16px 12px; border-top: 1px solid var(--border-light); }
+.status-pill {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius);
+  background: var(--bg); border: 1px solid var(--border);
 }
-.logo h1{font-size:15px;font-weight:800;color:var(--text);letter-spacing:-.01em;}
-.logo sub{font-size:10px;color:var(--dim);font-weight:400;display:block;margin-top:-2px;}
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-4); flex-shrink: 0; }
+.status-dot.running { background: var(--green); box-shadow: 0 0 0 2px var(--green-bg); }
+.status-dot.analysing { background: var(--yellow); box-shadow: 0 0 0 2px var(--yellow-bg); }
+.status-dot.market_closed { background: var(--red); box-shadow: 0 0 0 2px var(--red-bg); }
+.status-label { font-size: 12px; font-weight: 500; color: var(--text-2); text-transform: capitalize; }
+.status-sub { font-size: 10px; color: var(--text-4); }
 
-.header-stats{display:flex;gap:24px;margin-left:auto;align-items:center;}
-.hstat{text-align:right;}
-.hstat .label{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;}
-.hstat .val{font-size:16px;font-weight:700;line-height:1.2;}
-.hstat .val.pos{color:var(--green);}
-.hstat .val.neg{color:var(--red);}
-.hstat .val.neutral{color:var(--text);}
+/* MAIN */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-.badge{
-  padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;
-  letter-spacing:.08em;text-transform:uppercase;border:1px solid;
+/* TOP BAR */
+.topbar {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0 28px; height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 10;
 }
-.badge.running{background:#00ff8811;border-color:#00ff8840;color:var(--green);}
-.badge.idle{background:#4a556811;border-color:#4a556830;color:var(--dim);}
-.badge.analysing{background:#ffc84311;border-color:#ffc84340;color:var(--yellow);}
-.badge.market_closed{background:#ff3b5c11;border-color:#ff3b5c30;color:var(--red);}
+.topbar-left { display: flex; flex-direction: column; }
+.topbar-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.topbar-sub { font-size: 11px; color: var(--text-4); }
+.topbar-right { display: flex; align-items: center; gap: 16px; }
+.topbar-stat { text-align: right; }
+.topbar-stat .label { font-size: 10px; color: var(--text-4); font-weight: 500; text-transform: uppercase; letter-spacing: .06em; }
+.topbar-stat .value { font-size: 15px; font-weight: 700; color: var(--text); }
+.topbar-stat .value.up { color: var(--green); }
+.topbar-stat .value.dn { color: var(--red); }
+.topbar-divider { width: 1px; height: 32px; background: var(--border); }
 
-/* ── LAYOUT ─────────────────────────────────────────── */
-main{padding:16px 24px;display:grid;gap:14px;}
+/* CONTENT */
+.content { padding: 24px 28px; display: flex; flex-direction: column; gap: 20px; }
 
-.row{display:grid;gap:14px;}
-.row-4{grid-template-columns:repeat(4,1fr);}
-.row-2{grid-template-columns:1fr 1fr;}
-.row-3{grid-template-columns:2fr 1fr 1fr;}
-
-/* ── CARDS ──────────────────────────────────────────── */
-.card{
-  background:var(--card);border:1px solid var(--border);
-  border-radius:10px;padding:16px;position:relative;overflow:hidden;
+/* CARDS */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
 }
-.card::before{
-  content:'';position:absolute;top:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,var(--border),transparent);
+.card-header {
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex; align-items: center; justify-content: space-between;
 }
-.card h3{
-  font-size:9px;color:var(--dim);text-transform:uppercase;
-  letter-spacing:.12em;margin-bottom:12px;display:flex;align-items:center;gap:6px;
+.card-title { font-size: 12px; font-weight: 600; color: var(--text); }
+.card-sub { font-size: 11px; color: var(--text-3); }
+.card-body { padding: 18px; }
+
+/* STAT CARDS */
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px 20px;
 }
-.card h3 .dot{width:5px;height:5px;border-radius:50%;background:var(--blue2);}
-
-.stat-val{font-size:28px;font-weight:800;letter-spacing:-.02em;line-height:1;}
-.stat-sub{font-size:10px;color:var(--dim);margin-top:5px;}
-
-/* ── CHART ──────────────────────────────────────────── */
-#pnl-chart{width:100%!important;height:180px!important;}
-
-/* ── TABLES ─────────────────────────────────────────── */
-.table-wrap{overflow-x:auto;}
-table{width:100%;border-collapse:collapse;}
-th{
-  text-align:left;color:var(--dim);font-size:9px;
-  text-transform:uppercase;letter-spacing:.1em;
-  padding:0 8px 8px;border-bottom:1px solid var(--border);
+.stat-label { font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+.stat-value { font-size: 26px; font-weight: 700; color: var(--text); letter-spacing: -.02em; line-height: 1; }
+.stat-change {
+  margin-top: 6px; font-size: 12px; font-weight: 500;
+  display: flex; align-items: center; gap: 4px;
 }
-td{
-  padding:7px 8px;border-bottom:1px solid #0f1a24;
-  font-size:11px;vertical-align:middle;
+.stat-change.up { color: var(--green); }
+.stat-change.dn { color: var(--red); }
+.stat-change.neutral { color: var(--text-4); }
+.stat-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600;
 }
-tr:last-child td{border-bottom:none;}
-tr:hover td{background:#0a1520;}
+.stat-badge.up { background: var(--green-bg); color: var(--green); }
+.stat-badge.dn { background: var(--red-bg); color: var(--red); }
 
-/* ── PILLS ──────────────────────────────────────────── */
-.pill{
-  display:inline-flex;align-items:center;gap:4px;
-  padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;
-  letter-spacing:.04em;border:1px solid;
+/* WEEK TRACK */
+.week-track { display: flex; gap: 6px; margin-top: 10px; }
+.week-step {
+  flex: 1; height: 6px; border-radius: 3px; background: var(--border);
+  transition: background .3s;
 }
-.pill.buy{background:#00ff8814;border-color:#00ff8840;color:var(--green);}
-.pill.sell{background:#ff3b5c14;border-color:#ff3b5c40;color:var(--red);}
-.pill.hold{background:#4a556814;border-color:#4a556830;color:var(--dim);}
-.buy-text{color:var(--green);}
-.sell-text{color:var(--red);}
+.week-step.done { background: var(--green); }
+.week-step.active { background: var(--red); }
+.week-label { font-size: 11px; color: var(--text-3); margin-top: 4px; }
 
-/* ── CONFIDENCE BAR ─────────────────────────────────── */
-.conf-bar{
-  width:50px;height:4px;background:var(--dim2);
-  border-radius:2px;overflow:hidden;display:inline-block;vertical-align:middle;
-  margin-right:4px;
+/* CHART */
+#pnl-chart { width: 100%!important; height: 200px!important; }
+
+/* TWO COL */
+.two-col { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+
+/* FEED */
+#feed { max-height: 260px; overflow-y: auto; }
+.feed-empty { padding: 20px; text-align: center; color: var(--text-4); font-size: 12px; }
+.feed-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 9px 18px; border-bottom: 1px solid var(--border-light);
+  font-size: 12px;
 }
-.conf-fill{height:100%;border-radius:2px;transition:width .3s;}
-
-/* ── SL/TP BADGES ───────────────────────────────────── */
-.sl-badge{color:var(--red);font-size:10px;}
-.tp-badge{color:var(--green);font-size:10px;}
-
-/* ── LIVE FEED ──────────────────────────────────────── */
-#feed{max-height:240px;overflow-y:auto;}
-#feed::-webkit-scrollbar{width:4px;}
-#feed::-webkit-scrollbar-track{background:transparent;}
-#feed::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
-.feed-item{
-  padding:7px 0;border-bottom:1px solid #0f1a24;
-  display:flex;gap:10px;align-items:flex-start;
-  font-size:11px;
+.feed-row:last-child { border-bottom: none; }
+.feed-time { color: var(--text-4); min-width: 52px; font-size: 11px; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.feed-badge {
+  padding: 1px 7px; border-radius: 20px; font-size: 10px; font-weight: 700;
+  flex-shrink: 0; margin-top: 2px;
 }
-.feed-item:last-child{border-bottom:none;}
-.feed-time{color:var(--dim);min-width:58px;font-size:10px;padding-top:1px;}
-.feed-tag{
-  padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700;
-  min-width:32px;text-align:center;border:1px solid;
+.feed-badge.buy { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+.feed-badge.sell { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+.feed-badge.hold { background: var(--bg); color: var(--text-4); border: 1px solid var(--border); }
+.feed-text { color: var(--text-2); flex: 1; line-height: 1.45; }
+.feed-text strong { color: var(--text); font-weight: 600; }
+
+/* TABLES */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; font-size: 11px; font-weight: 600;
+  color: var(--text-3); text-transform: uppercase; letter-spacing: .06em;
+  padding: 0 18px 10px; border-bottom: 1px solid var(--border);
 }
-.feed-tag.buy{background:#00ff8814;border-color:#00ff8840;color:var(--green);}
-.feed-tag.sell{background:#ff3b5c14;border-color:#ff3b5c40;color:var(--red);}
-.feed-tag.sl{background:#ff3b5c22;border-color:#ff3b5c60;color:var(--red);}
-.feed-tag.tp{background:#00ff8822;border-color:#00ff8860;color:var(--green);}
-.feed-tag.hold{background:#4a556814;border-color:#4a556830;color:var(--dim);}
-.feed-msg{color:var(--dim);flex:1;line-height:1.4;}
-.feed-msg strong{color:var(--text);}
+th:first-child { padding-left: 18px; }
+td { padding: 10px 18px; border-bottom: 1px solid var(--border-light); font-size: 13px; color: var(--text-2); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #fafafa; }
+.td-sym { font-weight: 600; color: var(--text); }
+.td-dim { color: var(--text-4); font-size: 12px; }
 
-/* ── WEEK BAR ───────────────────────────────────────── */
-#week-row{display:flex;gap:8px;align-items:center;}
-.wdot{
-  flex:1;height:28px;border-radius:6px;
-  display:flex;align-items:center;justify-content:center;
-  font-size:10px;font-weight:700;border:1px solid var(--border);
-  color:var(--dim);transition:all .3s;
+/* ACTION PILLS */
+.pill {
+  display: inline-flex; align-items: center; padding: 2px 9px;
+  border-radius: 20px; font-size: 11px; font-weight: 600; border: 1px solid;
 }
-.wdot.done{background:#00ff8814;border-color:#00ff8840;color:var(--green);}
-.wdot.active{background:var(--blue2);border-color:var(--blue2);color:#fff;}
+.pill.buy { background: var(--green-bg); color: var(--green); border-color: var(--green-border); }
+.pill.sell { background: var(--red-bg); color: var(--red); border-color: var(--red-border); }
+.pill.hold { background: var(--bg); color: var(--text-4); border-color: var(--border); }
 
-/* ── INDICATORS GRID ────────────────────────────────── */
-.ind-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
-.ind-item{background:#0a1520;border-radius:6px;padding:8px 10px;}
-.ind-label{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;}
-.ind-val{font-size:14px;font-weight:700;margin-top:2px;}
+/* STATUS BADGES */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; border: 1px solid;
+}
+.badge.running { background: var(--green-bg); color: var(--green); border-color: var(--green-border); }
+.badge.idle { background: var(--bg); color: var(--text-4); border-color: var(--border); }
+.badge.analysing { background: var(--yellow-bg); color: var(--yellow); border-color: var(--yellow-border); }
+.badge.market_closed { background: var(--red-bg); color: var(--red); border-color: var(--red-border); }
 
-/* ── SPARKLINES ─────────────────────────────────────── */
-.spark-row{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #0f1a24;}
-.spark-row:last-child{border-bottom:none;}
-.spark-sym{font-weight:700;width:72px;font-size:11px;}
-.spark-price{text-align:right;width:90px;font-size:11px;}
-.spark-chg{text-align:right;width:70px;font-size:10px;}
-.spark-canvas{flex:1;}
+/* CONFIDENCE */
+.conf-wrap { display: flex; align-items: center; gap: 6px; }
+.conf-track { width: 48px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.conf-fill { height: 100%; border-radius: 2px; transition: width .3s; background: var(--blue); }
+.conf-fill.hi { background: var(--green); }
+.conf-fill.lo { background: var(--text-4); }
+.conf-num { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
-/* ── PULSE ANIMATION ────────────────────────────────── */
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.pulse{animation:pulse 2s ease-in-out infinite;}
+/* SL/TP */
+.sl { color: var(--red); font-size: 12px; font-weight: 500; }
+.tp { color: var(--green); font-size: 12px; font-weight: 500; }
 
-/* ── SCROLLBARS ─────────────────────────────────────── */
-::-webkit-scrollbar{width:4px;height:4px;}
-::-webkit-scrollbar-track{background:transparent;}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+/* LIVE BADGE */
+.live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); margin-right: 4px; animation: blink 2s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1}50%{opacity:.3} }
+
+/* SECTION DIVIDER */
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.section-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.section-meta { font-size: 11px; color: var(--text-4); }
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 </style>
 </head>
 <body>
+<div class="app">
 
-<!-- TICKER BAR -->
-<div id="ticker-bar">
-  <div id="ticker-track">
-    <!-- populated by JS -->
-  </div>
-</div>
-
-<!-- HEADER -->
-<header>
-  <div class="logo">
-    <div class="logo-icon">🚀</div>
-    <div>
-      <h1>GALACTIC TRADER</h1>
-      <sub id="model-label">loading model…</sub>
-    </div>
-  </div>
-  <span class="badge idle" id="status-badge">idle</span>
-  <div class="header-stats">
-    <div class="hstat">
-      <div class="label">Portfolio</div>
-      <div class="val neutral" id="hdr-total">$—</div>
-    </div>
-    <div class="hstat">
-      <div class="label">P&amp;L</div>
-      <div class="val neutral" id="hdr-pnl">—</div>
-    </div>
-    <div class="hstat">
-      <div class="label">Cash</div>
-      <div class="val neutral" id="hdr-cash">$—</div>
-    </div>
-    <div class="hstat">
-      <div class="label">Updated</div>
-      <div class="val neutral" style="font-size:11px" id="hdr-time">—</div>
-    </div>
-  </div>
-</header>
-
-<main>
-  <!-- ROW 1: stats -->
-  <div class="row row-4">
-    <div class="card">
-      <h3><span class="dot"></span>Portfolio Value</h3>
-      <div class="stat-val" id="total-value">$—</div>
-      <div class="stat-sub" id="pnl-sub">—</div>
-    </div>
-    <div class="card">
-      <h3><span class="dot" style="background:var(--green)"></span>Cash Balance</h3>
-      <div class="stat-val" id="cash">$—</div>
-      <div class="stat-sub" id="cash-pct">—% liquid</div>
-    </div>
-    <div class="card">
-      <h3><span class="dot" style="background:var(--purple)"></span>Open Positions</h3>
-      <div class="stat-val" id="pos-value">$—</div>
-      <div class="stat-sub" id="pos-count">— positions</div>
-    </div>
-    <div class="card">
-      <h3><span class="dot" style="background:var(--yellow)"></span>Experiment Week</h3>
-      <div id="week-row" style="margin-top:4px;"></div>
-    </div>
-  </div>
-
-  <!-- ROW 2: chart + live decisions -->
-  <div class="row row-3">
-    <div class="card">
-      <h3><span class="dot" style="background:var(--cyan)"></span>Portfolio Value</h3>
-      <canvas id="pnl-chart"></canvas>
-    </div>
-    <div class="card" style="grid-column:span 2;">
-      <h3><span class="dot" style="background:var(--yellow)"></span>AI Signal Feed <span class="pulse" style="color:var(--green);font-size:10px;margin-left:4px;">● LIVE</span></h3>
-      <div id="feed"><div style="color:var(--dim);padding:20px 0;text-align:center;">Waiting for signals…</div></div>
-    </div>
-  </div>
-
-  <!-- ROW 3: positions + decisions table -->
-  <div class="row row-2">
-    <div class="card">
-      <h3><span class="dot" style="background:var(--purple)"></span>Open Positions</h3>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Last</th><th>SL</th><th>TP</th><th>P&amp;L</th></tr></thead>
-          <tbody id="positions-table"><tr><td colspan="7" style="color:var(--dim);text-align:center;padding:20px 0;">No open positions</td></tr></tbody>
-        </table>
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark">🚀</div>
+      <div>
+        <div class="logo-text">Galactic Trader</div>
+        <div class="logo-sub" id="model-label">loading…</div>
       </div>
     </div>
-    <div class="card">
-      <h3><span class="dot" style="background:var(--blue)"></span>Latest AI Decisions</h3>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Symbol</th><th>Action</th><th>Confidence</th><th>RSI</th><th>Reasoning</th></tr></thead>
-          <tbody id="decisions-table"><tr><td colspan="5" style="color:var(--dim);text-align:center;padding:20px 0;">Waiting…</td></tr></tbody>
-        </table>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Overview</div>
+      <a class="nav-item active" href="#">
+        <span class="icon">◻</span> Dashboard
+      </a>
+      <a class="nav-item" href="#positions">
+        <span class="icon">◈</span> Positions
+      </a>
+      <a class="nav-item" href="#trades">
+        <span class="icon">⇅</span> Trade Log
+      </a>
+      <a class="nav-item" href="#feed">
+        <span class="icon">◉</span> Signal Feed
+      </a>
+    </div>
+    <div class="sidebar-footer">
+      <div class="status-pill">
+        <div class="status-dot" id="status-dot"></div>
+        <div>
+          <div class="status-label" id="status-text">idle</div>
+          <div class="status-sub" id="status-time">—</div>
+        </div>
       </div>
     </div>
-  </div>
+  </nav>
 
-  <!-- ROW 4: trade log -->
-  <div class="card">
-    <h3><span class="dot" style="background:var(--green)"></span>Trade Log</h3>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Value</th><th>Reason</th></tr></thead>
-        <tbody id="trades-table"><tr><td colspan="7" style="color:var(--dim);text-align:center;padding:20px 0;">No trades yet</td></tr></tbody>
-      </table>
+  <div class="main">
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-title">Dashboard</div>
+        <div class="topbar-sub">Paper trading · Alpaca Markets</div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-stat">
+          <div class="label">Portfolio</div>
+          <div class="value" id="hdr-total">$—</div>
+        </div>
+        <div class="topbar-divider"></div>
+        <div class="topbar-stat">
+          <div class="label">P&amp;L</div>
+          <div class="value" id="hdr-pnl">—</div>
+        </div>
+        <div class="topbar-divider"></div>
+        <div class="topbar-stat">
+          <div class="label">Cash</div>
+          <div class="value" id="hdr-cash">$—</div>
+        </div>
+        <div class="topbar-divider"></div>
+        <span class="badge idle" id="status-badge">idle</span>
+      </div>
     </div>
-  </div>
-</main>
+
+    <div class="content">
+
+      <!-- STAT CARDS -->
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Portfolio Value</div>
+          <div class="stat-value" id="total-value">$—</div>
+          <div class="stat-change neutral" id="pnl-change">— from start</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Cash Balance</div>
+          <div class="stat-value" id="cash">$—</div>
+          <div class="stat-change neutral" id="cash-pct">—% liquid</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Open Positions</div>
+          <div class="stat-value" id="pos-value">$—</div>
+          <div class="stat-change neutral" id="pos-count">— positions</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Experiment Progress</div>
+          <div class="stat-value" style="font-size:20px" id="week-label">Week 1</div>
+          <div class="week-track" id="week-track"></div>
+        </div>
+      </div>
+
+      <!-- CHART + FEED -->
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Portfolio Value</span>
+            <span class="card-sub" id="chart-range">All time</span>
+          </div>
+          <div class="card-body" style="padding:12px 16px 14px;">
+            <canvas id="pnl-chart"></canvas>
+          </div>
+        </div>
+
+        <div class="card" id="feed-card">
+          <div class="card-header">
+            <span class="card-title"><span class="live-dot"></span>Signal Feed</span>
+            <span class="card-sub">Live AI decisions</span>
+          </div>
+          <div id="feed"><div class="feed-empty">Waiting for signals…</div></div>
+        </div>
+      </div>
+
+      <!-- POSITIONS + DECISIONS -->
+      <div class="two-col" id="positions">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Open Positions</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Last</th><th>Stop Loss</th><th>Take Profit</th><th>P&amp;L</th></tr></thead>
+              <tbody id="positions-table"><tr><td colspan="7" class="td-dim" style="text-align:center;padding:20px 18px;">No open positions</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">AI Decisions</span>
+            <span class="card-sub">Latest per symbol</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Symbol</th><th>Action</th><th>Confidence</th><th>RSI</th><th>Reasoning</th></tr></thead>
+              <tbody id="decisions-table"><tr><td colspan="5" class="td-dim" style="text-align:center;padding:20px 18px;">Waiting for data…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TRADE LOG -->
+      <div class="card" id="trades">
+        <div class="card-header">
+          <span class="card-title">Trade Log</span>
+          <span class="card-sub">Refreshes every 15s</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Value</th><th>Reason</th></tr></thead>
+            <tbody id="trades-table"><tr><td colspan="7" class="td-dim" style="text-align:center;padding:20px 18px;">No trades yet</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
@@ -309,224 +403,198 @@ const ws = new WebSocket(`ws://${location.host}/ws`);
 let chart = null;
 let startVal = null;
 let feedItems = [];
-const SYMBOLS = [];
 
-// ── FORMAT HELPERS ───────────────────────────────────────
-function fmt(n){return '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
-function fmtSmall(n){
-  if(Math.abs(n)>=1000) return '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
-  return '$'+Number(n).toFixed(4);
+function fmt(n) { return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtSmall(n) {
+  if (Math.abs(n) >= 1000) return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:0,maximumFractionDigits:0});
+  return '$' + Number(n).toFixed(4);
 }
-function fmtPct(diff,base){
-  const p=(diff/base*100).toFixed(2);
-  return (diff>=0?'+':'')+fmt(diff)+' ('+(diff>=0?'+':'')+p+'%)';
+function fmtPct(diff, base) {
+  const p = (diff / base * 100).toFixed(2);
+  return (diff >= 0 ? '+' : '') + fmt(diff) + ' (' + (diff >= 0 ? '+' : '') + p + '%)';
 }
-function timeStr(){return new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
-function shortTime(ts){return new Date(ts+'Z').toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
-function colorPnl(val,el){
-  el.style.color=val>0?'var(--green)':val<0?'var(--red)':'var(--dim)';
-}
+function timeStr() { return new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+function shortTime(ts) { return new Date(ts+'Z').toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 
-// ── TICKER ───────────────────────────────────────────────
-let tickerPrices = {};
-function buildTicker(){
-  const track = document.getElementById('ticker-track');
-  const items = Object.entries(tickerPrices).map(([sym,data])=>{
-    const chgCls = data.chg>=0?'up':'dn';
-    const sign = data.chg>=0?'+':'';
-    return `<div class="ticker-item">
-      <span class="sym">${sym}</span>
-      <span>${fmtSmall(data.price)}</span>
-      <span class="chg ${chgCls}">${sign}${(data.chg||0).toFixed(2)}%</span>
-    </div>`;
-  }).join('');
-  // duplicate for seamless loop
-  track.innerHTML = items + items;
-}
-
-// ── FEED ─────────────────────────────────────────────────
-function pushFeed(tag, sym, msg){
+// Feed
+function pushFeed(tag, sym, msg) {
   feedItems.unshift({tag, sym, msg, time: timeStr()});
-  if(feedItems.length>50) feedItems.pop();
+  if (feedItems.length > 60) feedItems.pop();
   renderFeed();
 }
-function renderFeed(){
+function renderFeed() {
   const el = document.getElementById('feed');
-  if(!feedItems.length){el.innerHTML='<div style="color:var(--dim);padding:20px 0;text-align:center;">Waiting for signals…</div>';return;}
-  el.innerHTML = feedItems.slice(0,20).map(f=>`
-    <div class="feed-item">
+  if (!feedItems.length) { el.innerHTML = '<div class="feed-empty">Waiting for signals…</div>'; return; }
+  el.innerHTML = feedItems.slice(0,20).map(f => `
+    <div class="feed-row">
       <span class="feed-time">${f.time}</span>
-      <span class="feed-tag ${f.tag}">${f.tag.toUpperCase()}</span>
-      <span class="feed-msg"><strong>${f.sym}</strong> ${f.msg}</span>
+      <span class="feed-badge ${f.tag}">${f.tag.toUpperCase()}</span>
+      <span class="feed-text"><strong>${f.sym}</strong> ${f.msg}</span>
     </div>`).join('');
 }
 
-// ── WEBSOCKET STATE ───────────────────────────────────────
 let prevDecisions = {};
-ws.onmessage=(e)=>{
-  const d=JSON.parse(e.data);
-  if(d.type!=='state') return;
+ws.onmessage = (e) => {
+  const d = JSON.parse(e.data);
+  if (d.type !== 'state') return;
 
-  // Badge
-  const badge=document.getElementById('status-badge');
-  badge.className='badge '+d.status;
-  badge.textContent=d.status.replace('_',' ');
+  // Status
+  const badge = document.getElementById('status-badge');
+  badge.className = 'badge ' + d.status;
+  badge.textContent = d.status.replace('_', ' ');
+  const dot = document.getElementById('status-dot');
+  dot.className = 'status-dot ' + d.status;
+  document.getElementById('status-text').textContent = d.status.replace('_', ' ');
+  document.getElementById('status-time').textContent = 'Updated ' + timeStr();
 
-  // Header stats
-  document.getElementById('hdr-time').textContent=timeStr();
-  document.getElementById('hdr-cash').textContent=fmt(d.cash);
-  document.getElementById('hdr-total').textContent=fmt(d.total_value);
-  if(!startVal) startVal=d.total_value;
-  const diff=d.total_value-startVal;
-  const pnlEl=document.getElementById('hdr-pnl');
-  pnlEl.textContent=(diff>=0?'+':'')+fmt(diff);
-  colorPnl(diff,pnlEl);
+  // Topbar
+  document.getElementById('hdr-total').textContent = fmt(d.total_value);
+  document.getElementById('hdr-cash').textContent = fmt(d.cash);
+  if (!startVal) startVal = d.total_value;
+  const diff = d.total_value - startVal;
+  const pnlEl = document.getElementById('hdr-pnl');
+  pnlEl.textContent = (diff >= 0 ? '+' : '') + fmt(diff);
+  pnlEl.className = 'value ' + (diff > 0 ? 'up' : diff < 0 ? 'dn' : '');
 
-  // Cards
-  document.getElementById('total-value').textContent=fmt(d.total_value);
-  const sub=document.getElementById('pnl-sub');
-  sub.textContent=fmtPct(diff,startVal||1);
-  colorPnl(diff,sub);
-  document.getElementById('cash').textContent=fmt(d.cash);
-  document.getElementById('pos-value').textContent=fmt(d.positions_value||0);
+  // Stat cards
+  document.getElementById('total-value').textContent = fmt(d.total_value);
+  document.getElementById('cash').textContent = fmt(d.cash);
+  document.getElementById('pos-value').textContent = fmt(d.positions_value || 0);
 
-  // Cash pct
-  const cashPct=d.total_value>0?((d.cash/d.total_value)*100).toFixed(1):'—';
-  document.getElementById('cash-pct').textContent=cashPct+'% liquid';
+  const pnlChange = document.getElementById('pnl-change');
+  pnlChange.textContent = fmtPct(diff, startVal || 1) + ' from start';
+  pnlChange.className = 'stat-change ' + (diff > 0 ? 'up' : diff < 0 ? 'dn' : 'neutral');
 
-  // Open position count
-  const openCount=Object.values(d.positions||{}).filter(p=>p.quantity>0).length;
-  document.getElementById('pos-count').textContent=openCount+' position'+(openCount!==1?'s':'');
+  const cashPct = d.total_value > 0 ? ((d.cash / d.total_value) * 100).toFixed(1) : '—';
+  document.getElementById('cash-pct').textContent = cashPct + '% liquid';
 
-  // Week dots
-  const wrow=document.getElementById('week-row');
-  wrow.innerHTML=[1,2,3,4,5,6].map(i=>`<div class="wdot${i<d.week?' done':i===d.week?' active':''}">W${i}</div>`).join('');
+  const openCount = Object.values(d.positions || {}).filter(p => p.quantity > 0).length;
+  document.getElementById('pos-count').textContent = openCount + ' position' + (openCount !== 1 ? 's' : '');
 
-  // Ticker prices from last decisions
-  const dec=d.last_decisions||{};
-  Object.entries(dec).forEach(([sym,v])=>{
-    if(v.indicators&&v.indicators.price){
-      tickerPrices[sym]={price:v.indicators.price,chg:0};
+  // Week track
+  document.getElementById('week-label').textContent = 'Week ' + d.week;
+  document.getElementById('week-track').innerHTML = [1,2,3,4,5,6].map(i =>
+    `<div class="week-step${i < d.week ? ' done' : i === d.week ? ' active' : ''}"></div>`
+  ).join('');
+
+  // Feed diff
+  const dec = d.last_decisions || {};
+  Object.entries(dec).forEach(([sym, v]) => {
+    const prev = prevDecisions[sym];
+    if (!prev || prev.timestamp !== v.timestamp) {
+      const conf = ((v.confidence || 0) * 100).toFixed(0) + '%';
+      pushFeed(v.action, sym, conf + ' confidence — ' + (v.reasoning || ''));
     }
   });
-  buildTicker();
-
-  // Feed: diff decisions
-  Object.entries(dec).forEach(([sym,v])=>{
-    const prev=prevDecisions[sym];
-    if(!prev||prev.timestamp!==v.timestamp){
-      const tag=v.action;
-      const conf=((v.confidence||0)*100).toFixed(0)+'%';
-      const msg=`${conf} conf — ${v.reasoning||''}`;
-      pushFeed(tag,sym,msg);
-    }
-  });
-  prevDecisions={...dec};
+  prevDecisions = {...dec};
 
   // Decisions table
-  const decRows=Object.entries(dec).map(([sym,v])=>{
-    const conf=v.confidence||0;
-    const rsi=v.indicators?.rsi||'—';
-    const rsiColor=rsi>70?'var(--red)':rsi<30?'var(--green)':'var(--dim)';
-    const confW=Math.round(conf*100);
-    const confColor=conf>=0.8?'var(--green)':conf>=0.65?'var(--yellow)':'var(--dim)';
+  const decRows = Object.entries(dec).map(([sym, v]) => {
+    const conf = v.confidence || 0;
+    const confW = Math.round(conf * 100);
+    const confClass = conf >= 0.8 ? 'hi' : conf >= 0.65 ? '' : 'lo';
+    const rsi = v.indicators?.rsi || '—';
+    const rsiColor = rsi > 70 ? 'var(--red)' : rsi < 30 ? 'var(--green)' : 'var(--text-3)';
     return `<tr>
-      <td style="font-weight:700">${sym}</td>
+      <td class="td-sym">${sym}</td>
       <td><span class="pill ${v.action}">${v.action.toUpperCase()}</span></td>
       <td>
-        <div class="conf-bar"><div class="conf-fill" style="width:${confW}%;background:${confColor}"></div></div>
-        <span style="color:${confColor}">${confW}%</span>
+        <div class="conf-wrap">
+          <div class="conf-track"><div class="conf-fill ${confClass}" style="width:${confW}%"></div></div>
+          <span class="conf-num">${confW}%</span>
+        </div>
       </td>
-      <td style="color:${rsiColor}">${rsi}</td>
-      <td style="color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${v.reasoning||''}">${v.reasoning||'—'}</td>
+      <td style="color:${rsiColor};font-weight:500">${rsi}</td>
+      <td class="td-dim" style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${v.reasoning || ''}">${v.reasoning || '—'}</td>
     </tr>`;
   }).join('');
-  document.getElementById('decisions-table').innerHTML=decRows||'<tr><td colspan="5" style="color:var(--dim);text-align:center;padding:20px 0;">Waiting…</td></tr>';
+  document.getElementById('decisions-table').innerHTML = decRows ||
+    '<tr><td colspan="5" class="td-dim" style="text-align:center;padding:20px 18px;">Waiting for data…</td></tr>';
 
   // Positions table
-  const pos=d.positions||{};
-  const posRows=Object.entries(pos).filter(([s,p])=>p.quantity>0).map(([sym,p])=>{
-    const last=p.last_price||p.avg_cost;
-    const pnl=(last-p.avg_cost)*p.quantity;
-    const sl=p.stop_loss>0?fmtSmall(p.stop_loss):'—';
-    const tp=p.take_profit>0?fmtSmall(p.take_profit):'—';
+  const pos = d.positions || {};
+  const posRows = Object.entries(pos).filter(([,p]) => p.quantity > 0).map(([sym, p]) => {
+    const last = p.last_price || p.avg_cost;
+    const pnl = (last - p.avg_cost) * p.quantity;
+    const sl = p.stop_loss > 0 ? fmtSmall(p.stop_loss) : '—';
+    const tp = p.take_profit > 0 ? fmtSmall(p.take_profit) : '—';
     return `<tr>
-      <td style="font-weight:700">${sym}</td>
+      <td class="td-sym">${sym}</td>
       <td>${p.quantity}</td>
       <td>${fmtSmall(p.avg_cost)}</td>
       <td>${fmtSmall(last)}</td>
-      <td class="sl-badge">${sl}</td>
-      <td class="tp-badge">${tp}</td>
-      <td style="color:${pnl>=0?'var(--green)':'var(--red)'};font-weight:700">${fmt(pnl)}</td>
+      <td class="sl">${sl}</td>
+      <td class="tp">${tp}</td>
+      <td style="font-weight:600;color:${pnl >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(pnl)}</td>
     </tr>`;
   }).join('');
-  document.getElementById('positions-table').innerHTML=posRows||'<tr><td colspan="7" style="color:var(--dim);text-align:center;padding:20px 0;">No open positions</td></tr>';
+  document.getElementById('positions-table').innerHTML = posRows ||
+    '<tr><td colspan="7" class="td-dim" style="text-align:center;padding:20px 18px;">No open positions</td></tr>';
 };
 
-// ── TRADE LOG ─────────────────────────────────────────────
-async function loadTrades(){
-  const r=await fetch('/api/trades?limit=30');
-  const trades=await r.json();
-  const rows=trades.map(t=>`<tr>
-    <td style="color:var(--dim)">${shortTime(t.timestamp)}</td>
-    <td style="font-weight:700">${t.symbol}</td>
+async function loadTrades() {
+  const r = await fetch('/api/trades?limit=30');
+  const trades = await r.json();
+  const rows = trades.map(t => `<tr>
+    <td class="td-dim">${shortTime(t.timestamp)}</td>
+    <td class="td-sym">${t.symbol}</td>
     <td><span class="pill ${t.side}">${t.side.toUpperCase()}</span></td>
     <td>${t.quantity}</td>
     <td>${fmtSmall(t.price)}</td>
     <td>${fmt(t.value)}</td>
-    <td style="color:var(--dim);max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${t.reason||''}">${t.reason||'—'}</td>
+    <td class="td-dim" style="max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${t.reason||''}">${t.reason || '—'}</td>
   </tr>`).join('');
-  document.getElementById('trades-table').innerHTML=rows||'<tr><td colspan="7" style="color:var(--dim);text-align:center;padding:20px 0;">No trades yet</td></tr>';
+  document.getElementById('trades-table').innerHTML = rows ||
+    '<tr><td colspan="7" class="td-dim" style="text-align:center;padding:20px 18px;">No trades yet</td></tr>';
 }
 
-// ── P&L CHART ─────────────────────────────────────────────
-async function loadChart(){
-  const r=await fetch('/api/snapshots?limit=300');
-  const snaps=await r.json();
-  if(!snaps.length) return;
-  const labels=snaps.map(s=>shortTime(s.timestamp));
-  const values=snaps.map(s=>s.total_value);
-  const base=values[0]||1;
-  const last=values[values.length-1];
-  const isUp=last>=base;
-  const lineColor=isUp?'#00ff88':'#ff3b5c';
-  const fillColor=isUp?'rgba(0,255,136,0.05)':'rgba(255,59,92,0.05)';
-  const ctx=document.getElementById('pnl-chart').getContext('2d');
-  if(chart) chart.destroy();
-  chart=new Chart(ctx,{
-    type:'line',
-    data:{labels,datasets:[{
-      label:'Portfolio',data:values,
-      borderColor:lineColor,backgroundColor:fillColor,
-      fill:true,tension:0.3,pointRadius:0,borderWidth:2
+async function loadChart() {
+  const r = await fetch('/api/snapshots?limit=300');
+  const snaps = await r.json();
+  if (!snaps.length) return;
+  const labels = snaps.map(s => shortTime(s.timestamp));
+  const values = snaps.map(s => s.total_value);
+  const base = values[0] || 1;
+  const last = values[values.length - 1];
+  const isUp = last >= base;
+  const ctx = document.getElementById('pnl-chart').getContext('2d');
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{
+      label: 'Portfolio',
+      data: values,
+      borderColor: isUp ? '#16a34a' : '#dc2626',
+      backgroundColor: isUp ? 'rgba(22,163,74,0.06)' : 'rgba(220,38,38,0.06)',
+      fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5
     }]},
-    options:{
-      animation:false,responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{
-        mode:'index',intersect:false,
-        backgroundColor:'#0e1520',borderColor:'#1a2233',borderWidth:1,
-        titleColor:'#e2eaf5',bodyColor:'#4a5568',
-        callbacks:{label:c=>` ${fmt(c.parsed.y)}`}
-      }},
-      scales:{
-        x:{ticks:{color:'#4a5568',maxTicksLimit:6,font:{size:9}},grid:{color:'#0f1a24'}},
-        y:{ticks:{color:'#4a5568',callback:v=>'$'+v.toLocaleString(),font:{size:9}},grid:{color:'#0f1a24'}}
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          mode: 'index', intersect: false,
+          backgroundColor: '#fff', borderColor: '#e5e7eb', borderWidth: 1,
+          titleColor: '#111827', bodyColor: '#6b7280', padding: 10,
+          callbacks: { label: c => ` ${fmt(c.parsed.y)}` }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#9ca3af', maxTicksLimit: 6, font: { size: 10, family: 'Inter' } }, grid: { color: '#f3f4f6' } },
+        y: { ticks: { color: '#9ca3af', callback: v => '$' + v.toLocaleString(), font: { size: 10, family: 'Inter' } }, grid: { color: '#f3f4f6' } }
       }
     }
   });
 }
 
-// ── MODEL LABEL ───────────────────────────────────────────
-fetch('/api/status').then(r=>r.json()).then(s=>{
-  document.getElementById('model-label').textContent='model: '+s.model+' · paper trading';
-  s.symbols.forEach(sym=>tickerPrices[sym]={price:0,chg:0});
-  buildTicker();
+fetch('/api/status').then(r => r.json()).then(s => {
+  document.getElementById('model-label').textContent = s.model;
 });
 
 loadTrades();
 loadChart();
-setInterval(loadTrades,15000);
-setInterval(loadChart,30000);
+setInterval(loadTrades, 15000);
+setInterval(loadChart, 30000);
 </script>
 </body>
 </html>
