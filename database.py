@@ -17,7 +17,8 @@ async def init_db():
                 price REAL NOT NULL,
                 value REAL NOT NULL,
                 reason TEXT,                 -- LLM reasoning
-                strategy TEXT DEFAULT 'ema_crossover'
+                strategy TEXT DEFAULT 'ema_crossover',
+                fees REAL NOT NULL DEFAULT 0  -- regulatory fees (SEC + TAF + CAT)
             );
 
             CREATE TABLE IF NOT EXISTS portfolio (
@@ -60,18 +61,23 @@ async def init_db():
         if "take_profit" not in cols:
             await db.execute("ALTER TABLE portfolio ADD COLUMN take_profit REAL NOT NULL DEFAULT 0")
 
+        trade_col_rows = await (await db.execute("PRAGMA table_info(trades)")).fetchall()
+        trade_cols = {row[1] for row in trade_col_rows}
+        if "fees" not in trade_cols:
+            await db.execute("ALTER TABLE trades ADD COLUMN fees REAL NOT NULL DEFAULT 0")
+
         await db.commit()
     print("✅ Database initialised")
 
 
 async def record_trade(symbol, side, quantity, price, reason="", strategy="ema_crossover",
-                       stop_loss: float = 0.0, take_profit: float = 0.0):
+                       stop_loss: float = 0.0, take_profit: float = 0.0, fees: float = 0.0):
     async with aiosqlite.connect(DB_PATH) as db:
         value = quantity * price
         await db.execute(
-            "INSERT INTO trades (timestamp, symbol, side, quantity, price, value, reason, strategy) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (datetime.utcnow().isoformat(), symbol, side, quantity, price, value, reason, strategy)
+            "INSERT INTO trades (timestamp, symbol, side, quantity, price, value, reason, strategy, fees) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (datetime.utcnow().isoformat(), symbol, side, quantity, price, value, reason, strategy, fees)
         )
         # Update portfolio
         row = await (await db.execute("SELECT quantity, avg_cost FROM portfolio WHERE symbol=?", (symbol,))).fetchone()
