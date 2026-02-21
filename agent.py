@@ -207,6 +207,27 @@ async def fetch_bars(symbol: str, limit: int = 60) -> pd.DataFrame:
     return df
 
 
+async def refresh_live_prices(symbols: list[str] | None = None):
+    """Refresh in-memory last prices for the provided symbols."""
+    targets = [s for s in (symbols or []) if s]
+    if not targets:
+        return
+
+    async def _refresh_one(sym: str):
+        try:
+            df = await fetch_bars(sym, limit=1)
+            if df.empty:
+                return
+            px = float(df["close"].iloc[-1])
+            state["last_prices"][sym] = px
+            if sym in state["positions"]:
+                state["positions"][sym]["last_price"] = px
+        except Exception:
+            return
+
+    await asyncio.gather(*[_refresh_one(sym) for sym in dict.fromkeys(targets)])
+
+
 async def submit_order(symbol: str, side: str, qty: float) -> dict | None:
     """
     Submit a paper order via POST /v2/orders.

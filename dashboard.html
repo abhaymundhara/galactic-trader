@@ -403,6 +403,7 @@ const ws = new WebSocket(`ws://${location.host}/ws`);
 let chart = null;
 let startVal = null;
 let feedItems = [];
+let baselineVal = null;
 
 function fmt(n) { return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtSmall(n) {
@@ -451,7 +452,8 @@ ws.onmessage = (e) => {
   document.getElementById('hdr-total').textContent = fmt(d.total_value);
   document.getElementById('hdr-cash').textContent = fmt(d.cash);
   if (!startVal) startVal = d.total_value;
-  const diff = d.total_value - startVal;
+  const baseRef = baselineVal || startVal || d.total_value;
+  const diff = d.total_value - baseRef;
   const pnlEl = document.getElementById('hdr-pnl');
   pnlEl.textContent = (diff >= 0 ? '+' : '') + fmt(diff);
   pnlEl.className = 'value ' + (diff > 0 ? 'up' : diff < 0 ? 'dn' : '');
@@ -555,6 +557,7 @@ async function loadChart() {
   const labels = snaps.map(s => shortTime(s.timestamp));
   const values = snaps.map(s => s.total_value);
   const base = values[0] || 1;
+  baselineVal = base;
   const last = values[values.length - 1];
   const isUp = last >= base;
   const ctx = document.getElementById('pnl-chart').getContext('2d');

@@ -61,6 +61,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 for s, p in agent.state["positions"].items()
                 if p.get("quantity", 0) > 0
             ]
+            await agent.refresh_live_prices([p["symbol"] for p in portfolio])
             positions_value = sum(
                 p["quantity"] * agent.state["last_prices"].get(p["symbol"], p["last_price"])
                 for p in portfolio
