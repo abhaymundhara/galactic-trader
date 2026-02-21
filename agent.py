@@ -18,6 +18,12 @@ import database as db
 
 load_dotenv()
 
+# ── Rustrade-inspired improvements ───────────────────────────────────────────
+import time as _time
+import metrics as _metrics
+import risk_management as _rm
+from regime import Regime, detect_regime, strategy_for_regime
+
 ALPACA_KEY    = os.getenv("ALPACA_API_KEY", "")
 ALPACA_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
 
@@ -256,12 +262,14 @@ def apply_trailing_stop(symbol: str, price: float):
 
 
 def infer_regime(indicators: dict, higher_tf: dict | None) -> str:
-    adx = float(indicators.get("adx", 0) or 0)
-    bb_width = float(indicators.get("bb_width", 0) or 0)
-    h_cross = (higher_tf or {}).get("ema_cross", "unknown")
-    cross = indicators.get("ema_cross", "unknown")
-    trending = adx >= 20 and bb_width >= 0.006 and h_cross == cross and cross in ("bullish", "bearish")
-    return "trend" if trending else "range"
+    """Legacy wrapper — returns 'trend' or 'range' for backward-compatible callers."""
+    r = detect_regime(indicators, higher_tf)
+    return "trend" if r in (Regime.BULL, Regime.BEAR) else "range"
+
+
+def get_rich_regime(indicators: dict, higher_tf: dict | None = None) -> Regime:
+    """4-regime classifier — returns Bull/Bear/Sideways/Volatile."""
+    return detect_regime(indicators, higher_tf)
 
 
 def _as_finite_float(value: Any, default: float = 0.0) -> float:
@@ -394,6 +402,7 @@ state = {
     "loss_streak": {},        # symbol -> consecutive closed losses; >=2 triggers cooldown
     "short_positions": {},   # symbol -> {quantity, avg_cost, last_price, stop_loss, take_profit}
     "last_order_error": "",
+    "price_history": {},  # symbol -> list[float] last 30 closes (for correlation filter)
 }
 
 # Auth headers for all Alpaca calls
@@ -966,12 +975,14 @@ async def ask_llm(symbol: str, indicators: dict, position: dict | None,
                           short_position=short_position)
     try:
         client = ollama.AsyncClient()
+        _llm_t0 = _time.monotonic()
         response = await client.chat(
             model=OLLAMA_MODEL,
             messages=[{"role": "user", "content": prompt}],
             options={"temperature": 0.2},
             keep_alive="10m",
         )
+        _metrics.llm_latency.observe(_time.monotonic() - _llm_t0)
         text = ""
         if isinstance(response, dict):
             text = str(response.get("message", {}).get("content", "")).strip()
@@ -1064,6 +1075,24 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
     max_spend = max(0, portfolio_value * MAX_POS - current_pos_value)
 
     if action == "buy":
+        # ── Circuit breaker + advanced risk checks ───────────────────────────
+        cb_ok, cb_reason = _rm.circuit_breaker.check_all(current_equity(), state.get("halt_new_entries", False))
+        if not cb_ok:
+            print(f"🚫 Circuit breaker blocked BUY {symbol}: {cb_reason}")
+            _metrics.trades_failed.labels(symbol=symbol, reason="circuit_breaker").inc()
+            return False
+        sector_ok, sector_reason = _rm.sector_allows_entry(symbol, state["positions"], state["last_prices"], portfolio_value)
+        if not sector_ok:
+            print(f"🚫 Sector cap blocked BUY {symbol}: {sector_reason}")
+            _metrics.trades_failed.labels(symbol=symbol, reason="sector_cap").inc()
+            return False
+        open_longs = [s for s, p in state["positions"].items() if p.get("quantity", 0) > 0]
+        corr_ok, corr_reason = _rm.correlation_allows_entry(symbol, open_longs, state.get("price_history", {}))
+        if not corr_ok:
+            print(f"🚫 Correlation filter blocked BUY {symbol}: {corr_reason}")
+            _metrics.trades_failed.labels(symbol=symbol, reason="correlation").inc()
+            return False
+
         # Never pyramid into an underwater position.
         existing = state["positions"].get(symbol, {})
         if existing.get("quantity", 0) > 0:
@@ -1136,6 +1165,7 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         sl = state["positions"][symbol]["stop_loss"]
         tp = state["positions"][symbol]["take_profit"]
         print(f"🟢 BUY  {exec_qty} {symbol} @ ${price:.4f} | SL: ${sl:.4f} | TP: ${tp:.4f} | fees: ${buy_fees:.4f} | {reason}")
+        _metrics.trades_total.labels(symbol=symbol, side="buy").inc()
         return True
 
     elif action == "sell":
@@ -1159,6 +1189,7 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
         state["positions"][symbol]["take_profit"] = 0.0
         await db.record_trade(symbol, "sell", exec_qty, price, reason, stop_loss=0.0, take_profit=0.0, fees=sell_fees)
         print(f"🔴 SELL {exec_qty} {symbol} @ ${price:.4f} | fees: ${sell_fees:.4f} | {reason}")
+        _metrics.trades_total.labels(symbol=symbol, side="sell").inc()
         # Track per-symbol consecutive loss streak for cooldown.
         avg_c    = float(pos.get("avg_cost", price) or price)
         net_sell = (price - avg_c) * exec_qty - sell_fees
@@ -1170,6 +1201,11 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
 
     elif action == "short":
         # ── Open short position (stocks only — Alpaca does not support crypto shorts) ──
+        cb_ok, cb_reason = _rm.circuit_breaker.check_all(current_equity(), state.get("halt_new_entries", False))
+        if not cb_ok:
+            print(f"🚫 Circuit breaker blocked SHORT {symbol}: {cb_reason}")
+            _metrics.trades_failed.labels(symbol=symbol, reason="circuit_breaker").inc()
+            return False
         if is_crypto(symbol):
             print(f"⚠️  Short blocked {symbol}: crypto shorting not supported on Alpaca")
             return False
@@ -1268,7 +1304,20 @@ async def analyse_symbol(symbol: str):
         htf_df = await fetch_bars(symbol, limit=80, timeframe="15Min")
         if not htf_df.empty:
             higher_tf = compute_indicators(htf_df)
-    regime = infer_regime(indicators, higher_tf)
+    rich_regime = get_rich_regime(indicators, higher_tf)
+    regime = infer_regime(indicators, higher_tf)   # legacy string for build_prompt compatibility
+    _metrics.regime_gauge.labels(symbol=symbol).set(
+        {Regime.SIDEWAYS: 0, Regime.BULL: 1, Regime.BEAR: 2, Regime.VOLATILE: 3}.get(rich_regime, 0)
+    )
+    # If volatile regime, skip LLM and hold — signals are too noisy
+    if rich_regime == Regime.VOLATILE:
+        state["last_decision"][symbol] = {
+            "action": "hold", "confidence": 0.5,
+            "reasoning": f"Volatile regime — holding ({symbol})",
+            "indicators": indicators,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        return
 
     price = indicators["price"]
     state["last_prices"][symbol] = price
@@ -1276,6 +1325,11 @@ async def analyse_symbol(symbol: str):
         state["positions"][symbol]["last_price"] = price
     if symbol in state["short_positions"]:
         state["short_positions"][symbol]["last_price"] = price
+    # Track close price history for correlation filter (keep last 30 bars)
+    ph = state.setdefault("price_history", {})
+    ph.setdefault(symbol, []).append(price)
+    if len(ph[symbol]) > 30:
+        ph[symbol] = ph[symbol][-30:]
 
     # Ratchet trailing stops (long + short) before the SL/TP check.
     if ADD_ALL_FIVE:
@@ -1431,6 +1485,7 @@ async def analyse_symbol(symbol: str):
 async def run_agent():
     """Main agent loop — runs every 5 minutes."""
     await db.init_db()
+    await _rm.circuit_breaker.load()  # No-Amnesia: restore risk state
     state["last_decision"] = await db.get_latest_decisions_by_symbol()
     await fetch_account()
     await fetch_open_positions()
@@ -1468,6 +1523,16 @@ async def run_agent():
             await asyncio.sleep(1)
 
         snapshot = await db.record_snapshot(state["cash"], state["positions"], state["last_prices"])
+
+        # ── Metrics & circuit breaker update ────────────────────────────────
+        eq = float(snapshot.get("total_value", current_equity()))
+        await _rm.circuit_breaker.update_hwm(eq)
+        _metrics.equity_gauge.set(eq)
+        _metrics.cash_gauge.set(state["cash"])
+        _metrics.pnl_gauge.set(float(snapshot.get("total_pnl", 0)))
+        _metrics.drawdown_gauge.set(_rm.circuit_breaker.current_drawdown(eq))
+        _metrics.open_positions_gauge.set(sum(1 for p in state["positions"].values() if p.get("quantity", 0) > 0))
+        _metrics.open_shorts_gauge.set(sum(1 for p in state["short_positions"].values() if p.get("quantity", 0) > 0))
         state["status"] = "running" if IDLE_TIMEOUT_FIX or CONTINUOUS_ANALYSIS else "idle"
         loop_count      += 1
         state["week"]    = min(6, 1 + loop_count // 2016)

@@ -15,6 +15,11 @@ from starlette.websockets import WebSocketState
 
 import database as db
 import agent
+import metrics as _metrics
+from backtest import run_backtest, run_parallel_backtest, grid_search, STRATEGIES
+from prometheus_client import CONTENT_TYPE_LATEST
+from fastapi import Request
+from fastapi.responses import Response
 
 load_dotenv()
 
@@ -326,6 +331,56 @@ DASHBOARD = Path(__file__).parent / "dashboard.html"
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     return DASHBOARD.read_text()
+
+
+# ── Prometheus metrics endpoint ──────────────────────────────────────────────
+@app.get("/metrics")
+async def prometheus_metrics():
+    """Standard Prometheus scrape endpoint."""
+    return Response(content=_metrics.prometheus_output(), media_type=CONTENT_TYPE_LATEST)
+
+
+# ── Backtest endpoints ────────────────────────────────────────────────────────
+from pydantic import BaseModel
+
+class BacktestRequest(BaseModel):
+    symbol: str
+    strategy: str = "trend_riding"
+    start: str = ""
+    end: str = ""
+    starting_cash: float = 10_000.0
+
+
+@app.post("/backtest")
+async def backtest(req: BacktestRequest):
+    """Run a single-symbol backtest. Returns performance metrics."""
+    result = await run_backtest(
+        symbol=req.symbol,
+        strategy=req.strategy,
+        start=req.start,
+        end=req.end,
+        starting_cash=req.starting_cash,
+    )
+    return result.to_dict()
+
+
+@app.post("/backtest/parallel")
+async def backtest_parallel(symbols: list[str], strategy: str = "trend_riding", start: str = "", end: str = ""):
+    """Run backtests for multiple symbols concurrently."""
+    results = await run_parallel_backtest(symbols, strategy, start, end)
+    return [r.to_dict() for r in results]
+
+
+@app.post("/backtest/grid")
+async def backtest_grid(symbol: str, start: str = "", end: str = ""):
+    """Run grid search over all strategies for a symbol. Returns ranked by Sharpe."""
+    return await grid_search(symbol, start, end)
+
+
+@app.get("/backtest/strategies")
+async def list_strategies():
+    """List available backtest strategies."""
+    return {"strategies": list(STRATEGIES.keys())}
 
 
 if __name__ == "__main__":
