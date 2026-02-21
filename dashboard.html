@@ -866,13 +866,20 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script>
       const wsProto = location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${wsProto}://${location.host}/ws`);
+      let ws = null;
+      let wsRetryMs = 1000;
       let chart = null;
       let startVal = null;
       let feedItems = [];
       let baselineVal = null;
 
+      function num(v, fallback = 0) {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : fallback;
+      }
+
       function fmt(n) {
+        n = num(n, 0);
         return (
           "$" +
           Number(n).toLocaleString("en-US", {
@@ -882,6 +889,7 @@
         );
       }
       function fmtSmall(n) {
+        n = num(n, 0);
         if (Math.abs(n) >= 1000)
           return (
             "$" +
@@ -893,6 +901,8 @@
         return "$" + Number(n).toFixed(4);
       }
       function fmtPct(diff, base) {
+        diff = num(diff, 0);
+        base = Math.abs(num(base, 1)) || 1;
         const p = ((diff / base) * 100).toFixed(2);
         return (
           (diff >= 0 ? "+" : "") +
@@ -943,18 +953,23 @@
           .join("");
       }
 
-      let prevDecisions = {};
-      ws.onmessage = (e) => {
-        const d = JSON.parse(e.data);
+      function onSocketMessage(e) {
+        let d = null;
+        try {
+          d = JSON.parse(e.data);
+        } catch {
+          return;
+        }
         if (d.type !== "state") return;
+        const status = String(d.status || "idle");
 
         // Status
         const badge = document.getElementById("status-badge");
-        badge.className = "badge " + d.status;
-        badge.textContent = d.status.replace("_", " ");
+        badge.className = "badge " + status;
+        badge.textContent = status.replace("_", " ");
         const dot = document.getElementById("status-dot");
-        dot.className = "status-dot " + d.status;
-        document.getElementById("status-text").textContent = d.status.replace(
+        dot.className = "status-dot " + status;
+        document.getElementById("status-text").textContent = status.replace(
           "_",
           " ",
         );
@@ -965,9 +980,10 @@
         document.getElementById("hdr-total").textContent = fmt(d.total_value);
         document.getElementById("hdr-cash").textContent = fmt(d.cash);
         if (!startVal) startVal = d.total_value;
-        const baseRef = baselineVal || startVal || d.total_value;
-        const diff = d.total_value - baseRef;
-        const unrealized = Number(d.unrealized_pnl || 0);
+        const safeTotal = num(d.total_value, 0);
+        const baseRef = num(baselineVal || startVal || safeTotal, 1);
+        const diff = safeTotal - baseRef;
+        const unrealized = num(d.unrealized_pnl, 0);
         const realized = diff - unrealized;
         const pnlEl = document.getElementById("hdr-pnl");
         pnlEl.textContent = (diff >= 0 ? "+" : "") + fmt(diff);
@@ -991,7 +1007,7 @@
           "stat-change " + (diff > 0 ? "up" : diff < 0 ? "dn" : "neutral");
 
         const cashPct =
-          d.total_value > 0 ? ((d.cash / d.total_value) * 100).toFixed(1) : "—";
+          safeTotal > 0 ? ((num(d.cash, 0) / safeTotal) * 100).toFixed(1) : "—";
         document.getElementById("cash-pct").textContent = cashPct + "% liquid";
 
         const openCount = Object.values(d.positions || {}).filter(
@@ -1078,7 +1094,28 @@
         document.getElementById("positions-table").innerHTML =
           posRows ||
           '<tr><td colspan="7" class="td-dim" style="text-align:center;padding:20px 18px;">No open positions</td></tr>';
-      };
+      }
+
+      let prevDecisions = {};
+
+      function connectWs() {
+        ws = new WebSocket(`${wsProto}://${location.host}/ws`);
+        ws.onopen = () => {
+          wsRetryMs = 1000;
+        };
+        ws.onmessage = onSocketMessage;
+        ws.onclose = () => {
+          setTimeout(connectWs, wsRetryMs);
+          wsRetryMs = Math.min(10000, wsRetryMs * 2);
+        };
+        ws.onerror = () => {
+          try {
+            ws.close();
+          } catch {}
+        };
+      }
+
+      connectWs();
 
       async function loadTrades() {
         const r = await fetch("/api/trades?limit=30");

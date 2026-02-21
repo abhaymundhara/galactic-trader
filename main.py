@@ -37,6 +37,11 @@ app = FastAPI(title="Galactic Trader", lifespan=lifespan)
 clients: list[WebSocket] = []
 
 
+def _safe_remove_client(ws: WebSocket):
+    if ws in clients:
+        clients.remove(ws)
+
+
 async def broadcast(data: dict):
     dead = []
     for ws in clients:
@@ -56,35 +61,52 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             # Push live state every 3 seconds
             await asyncio.sleep(3)
-            portfolio = [
-                {"symbol": s, **p}
-                for s, p in agent.state["positions"].items()
-                if p.get("quantity", 0) > 0
-            ]
-            await agent.refresh_live_prices([p["symbol"] for p in portfolio])
-            positions_value = sum(
-                p["quantity"] * agent.state["last_prices"].get(p["symbol"], p["last_price"])
-                for p in portfolio
-            )
-            unrealized_pnl = sum(
-                (agent.state["last_prices"].get(p["symbol"], p["last_price"]) - p["avg_cost"]) * p["quantity"]
-                for p in portfolio
-            )
-            total_value = agent.state["cash"] + positions_value
-            payload = {
-                "type": "state",
-                "cash": round(agent.state["cash"], 2),
-                "total_value": round(total_value, 2),
-                "positions_value": round(positions_value, 2),
-                "unrealized_pnl": round(unrealized_pnl, 2),
-                "status": agent.state["status"],
-                "week": agent.state["week"],
-                "last_decisions": agent.state["last_decision"],
-                "positions": agent.state["positions"],
-            }
-            await websocket.send_json(payload)
+            try:
+                portfolio = [
+                    {"symbol": s, **p}
+                    for s, p in agent.state["positions"].items()
+                    if p.get("quantity", 0) > 0
+                ]
+
+                # Best-effort only. Never fail websocket updates due to price refresh issues.
+                try:
+                    await agent.refresh_live_prices([p["symbol"] for p in portfolio])
+                except Exception:
+                    pass
+
+                positions_value = sum(
+                    float(p.get("quantity", 0) or 0)
+                    * float(agent.state["last_prices"].get(p["symbol"], p.get("last_price", 0)) or 0)
+                    for p in portfolio
+                )
+                unrealized_pnl = sum(
+                    (
+                        float(agent.state["last_prices"].get(p["symbol"], p.get("last_price", 0)) or 0)
+                        - float(p.get("avg_cost", 0) or 0)
+                    )
+                    * float(p.get("quantity", 0) or 0)
+                    for p in portfolio
+                )
+                total_value = float(agent.state.get("cash", 0) or 0) + positions_value
+                payload = {
+                    "type": "state",
+                    "cash": round(float(agent.state.get("cash", 0) or 0), 2),
+                    "total_value": round(total_value, 2),
+                    "positions_value": round(positions_value, 2),
+                    "unrealized_pnl": round(unrealized_pnl, 2),
+                    "status": str(agent.state.get("status", "idle") or "idle"),
+                    "week": int(agent.state.get("week", 1) or 1),
+                    "last_decisions": agent.state.get("last_decision", {}) or {},
+                    "positions": agent.state.get("positions", {}) or {},
+                }
+                await websocket.send_json(payload)
+            except Exception:
+                # Keep the socket alive and retry on next tick.
+                continue
     except WebSocketDisconnect:
-        clients.remove(websocket)
+        _safe_remove_client(websocket)
+    except Exception:
+        _safe_remove_client(websocket)
 
 
 # ── REST endpoints ─────────────────────────────────────────────────────────────
