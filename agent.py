@@ -751,7 +751,7 @@ Rules (strictly enforced):
 4. Every SHORT: stop_loss 1.5–2.5% ABOVE entry, take_profit ≥ 3% BELOW entry (min 2:1 R:R)
 5. Pyramid ONLY if price > avg_cost for longs; ONLY if price < avg_cost for shorts
 6. Auto-exits handled by system — only choose "sell"/"cover" when rules are clearly met
-7. High conviction only — confidence < 0.70 = hold; only the clearest setups
+7. High conviction only — confidence < 0.65 = hold; only the clearest setups
 8. Only output actions listed in "Available actions" above
 
 Respond with ONLY valid JSON, no markdown:
@@ -1172,7 +1172,7 @@ async def analyse_symbol(symbol: str):
 
     await db.record_decision(symbol, action, confidence, reasoning, indicators)
 
-    if confidence >= 0.70 and action in ("buy", "sell", "short", "cover"):
+    if confidence >= 0.65 and action in ("buy", "sell", "short", "cover"):
         await execute_paper_trade(symbol, action, price, reasoning, stop_loss, take_profit)
 
 
