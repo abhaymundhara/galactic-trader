@@ -35,6 +35,26 @@ async def _init_mt5_tables():
                 broker      TEXT
             )
         """)
+        # ── Migration: fix pre-EA-fix close records that had inverted sides ──
+        # Old EA code used the CLOSING deal type (which is opposite the position
+        # direction) to set side.  Cross-reference close events against their
+        # matching open event by ticket to recover the correct side.
+        await db.execute("""
+            UPDATE mt5_trades
+            SET side = (
+                SELECT o.side FROM mt5_trades o
+                WHERE o.ticket = mt5_trades.ticket
+                  AND o.event  = 'open'
+                LIMIT 1
+            )
+            WHERE event = 'close'
+              AND EXISTS (
+                SELECT 1 FROM mt5_trades o
+                WHERE o.ticket = mt5_trades.ticket
+                  AND o.event  = 'open'
+                  AND o.side  != mt5_trades.side
+              )
+        """)
         await db.commit()
 
 

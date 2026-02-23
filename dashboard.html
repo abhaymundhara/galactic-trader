@@ -910,6 +910,8 @@
         border: 1px solid var(--border);
         border-radius: var(--radius);
         padding: 16px;
+        min-width: 0; /* prevent Chart.js canvas width from blowing out the grid cell */
+        overflow: hidden;
       }
       .mt5-chart-title {
         font-size: 12px;
@@ -2808,10 +2810,13 @@
               t.event === "open"
                 ? `<span class="mt5-badge-open">OPEN</span>`
                 : `<span class="mt5-badge-close">CLOSE</span>`;
+            const side = (t.side || "").toLowerCase();
             const sideBadge =
-              t.side === "buy"
+              side === "buy"
                 ? `<span class="mt5-badge-buy">BUY</span>`
-                : `<span class="mt5-badge-sell">SELL</span>`;
+                : side === "sell"
+                  ? `<span class="mt5-badge-sell">SELL</span>`
+                  : `<span style="color:var(--text-3);font-size:11px">${t.side || "—"}</span>`;
             return `<tr>
       <td>${t.ticket}</td>
       <td>${time}</td>
