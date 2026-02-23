@@ -434,6 +434,16 @@ async def dashboard():
 
 
 # ── Prometheus metrics endpoint ──────────────────────────────────────────────
+
+@app.get("/api/config")
+async def api_config():
+    """Expose runtime feature flags to the dashboard."""
+    import os
+    return {
+        "mt5_only": os.getenv("MT5_ONLY", "false").lower() in ("1", "true", "yes"),
+        "app_name": os.getenv("APP_NAME", "Galactic Trader"),
+    }
+
 @app.get("/metrics")
 async def prometheus_metrics():
     """Standard Prometheus scrape endpoint."""
