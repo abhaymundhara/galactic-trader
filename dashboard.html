@@ -845,7 +845,7 @@
           <div class="logo-mark">🚀</div>
           <div>
             <div class="logo-text">Galactic Trader</div>
-            <div class="logo-sub" id="model-label">loading…</div>
+            <div class="logo-sub" id="model-label">Strategy Engine</div>
           </div>
         </div>
         <div class="sidebar-section">
@@ -1678,7 +1678,7 @@
       fetch("/api/status")
         .then((r) => r.json())
         .then((s) => {
-          document.getElementById("model-label").textContent = s.model;
+          document.getElementById("model-label").textContent = s.active_strategy || "Strategy Engine";
         });
 
       loadTrades();
