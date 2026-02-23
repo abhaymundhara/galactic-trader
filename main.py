@@ -18,6 +18,7 @@ import agent
 import metrics as _metrics
 from backtest import run_backtest, run_parallel_backtest, grid_search, STRATEGIES
 from prometheus_client import CONTENT_TYPE_LATEST
+import mt5_bridge
 from fastapi import Request
 from fastapi.responses import Response
 
@@ -31,6 +32,7 @@ agent_task = None
 async def lifespan(app: FastAPI):
     global agent_task
     await db.init_db()
+    await mt5_bridge._init_mt5_tables()
     # Start agent in background
     agent_task = asyncio.create_task(agent.run_agent())
     yield
@@ -40,6 +42,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Galactic Trader", lifespan=lifespan)
+app.include_router(mt5_bridge.router)
 
 # ── WebSocket clients ──────────────────────────────────────────────────────────
 clients: list[WebSocket] = []
