@@ -23,8 +23,8 @@ class MomentumStrategy(BaseStrategy):
         macd_fast: int = 12,
         macd_slow: int = 26,
         macd_signal: int = 9,
-        volume_multiplier: float = 2.0,
-        breakout_period: int = 20,
+        volume_multiplier: float = 1.2,
+        breakout_period: int = 10,
         atr_sl: float = 1.5,
         atr_tp: float = 2.5,
     ) -> None:
@@ -89,26 +89,28 @@ class MomentumStrategy(BaseStrategy):
         # ── ENTRY long ──
         macd_cross_bullish = prev_macd <= prev_sig and cur_macd > cur_sig
         price_breakout_up  = current_price > recent_high
-        if position_qty == 0 and macd_cross_bullish and volume_surge and price_breakout_up:
-            confidence = min(0.92, 0.68 + (cur_vol / vol_avg - 2.0) * 0.05)
+        if position_qty == 0 and macd_cross_bullish and (volume_surge or price_breakout_up):
+            conf_boost = max(0.0, (cur_vol / vol_avg - self.volume_multiplier) * 0.05)
+            confidence = min(0.92, 0.68 + conf_boost + (0.04 if price_breakout_up else 0.0))
             sl = current_price - self.atr_sl * atr
             tp = current_price + self.atr_tp * atr
             return Signal(
                 "buy", confidence, sl, tp,
-                f"Momentum breakout long: MACD cross↑, vol={cur_vol/vol_avg:.1f}x, price broke ${recent_high:.2f}",
+                f"Momentum long: MACD cross↑, vol={cur_vol/vol_avg:.1f}x, breakout={price_breakout_up}",
                 self.name,
             )
 
         # ── ENTRY short ──
         macd_cross_bearish = prev_macd >= prev_sig and cur_macd < cur_sig
         price_breakout_dn  = current_price < recent_low
-        if position_qty == 0 and macd_cross_bearish and volume_surge and price_breakout_dn:
-            confidence = min(0.92, 0.68 + (cur_vol / vol_avg - 2.0) * 0.05)
+        if position_qty == 0 and macd_cross_bearish and (volume_surge or price_breakout_dn):
+            conf_boost = max(0.0, (cur_vol / vol_avg - self.volume_multiplier) * 0.05)
+            confidence = min(0.92, 0.68 + conf_boost + (0.04 if price_breakout_dn else 0.0))
             sl = current_price + self.atr_sl * atr
             tp = current_price - self.atr_tp * atr
             return Signal(
                 "short", confidence, sl, tp,
-                f"Momentum breakdown short: MACD cross↓, vol={cur_vol/vol_avg:.1f}x, price broke ${recent_low:.2f}",
+                f"Momentum short: MACD cross↓, vol={cur_vol/vol_avg:.1f}x, breakdown={price_breakout_dn}",
                 self.name,
             )
 

@@ -37,11 +37,16 @@ _momentum  = MomentumStrategy()
 _meanrev   = MeanReversionStrategy()
 _pairs     = PairsTradingStrategy()
 
-# Symbols best suited for each strategy
-SCALP_SYMBOLS    = {"AAPL", "TSLA", "NVDA", "MSFT", "SPY", "QQQ", "AMD", "META"}
-MOMENTUM_SYMBOLS = {"AAPL", "TSLA", "NVDA", "MSFT", "SPY", "QQQ", "AMD", "META",
-                    "GOOGL", "AMZN", "BTC/USD", "ETH/USD"}
-MEANREV_SYMBOLS  = {"SPY", "QQQ", "GLD", "SLV", "AAPL", "MSFT", "XOM", "CVX"}
+# Active strategy: Scalper only — runs on all symbols
+SCALP_SYMBOLS    = {
+    # Equities
+    "AAPL", "TSLA", "NVDA", "MSFT", "SPY", "QQQ", "AMD", "META",
+    "GOOGL", "AMZN", "GLD",
+    # Crypto
+    "BTC/USD", "ETH/USD", "SOL/USD", "XRP/USDT", "DOGE/USDT",
+}
+MOMENTUM_SYMBOLS: set[str] = set()   # disabled
+MEANREV_SYMBOLS:  set[str] = set()   # disabled
 
 
 def build_ohlcv_df(bars: list[dict[str, Any]]) -> pd.DataFrame:
@@ -86,7 +91,7 @@ def run_strategies(
 
     sym_upper = symbol.upper()
 
-    # ── Scalping (liquid high-vol stocks, 1-min bars) ──
+    # ── Scalping (all symbols) ──
     if sym_upper in SCALP_SYMBOLS:
         try:
             sig = _scalper.generate_signal(df, symbol, current_price, position_qty)
@@ -94,24 +99,6 @@ def run_strategies(
                 candidates.append(sig)
         except Exception as e:
             logger.warning(f"ScalpingStrategy error on {symbol}: {e}")
-
-    # ── Momentum (broad universe, 5-min bars) ──
-    if sym_upper in MOMENTUM_SYMBOLS:
-        try:
-            sig = _momentum.generate_signal(df, symbol, current_price, position_qty)
-            if sig.action != "hold":
-                candidates.append(sig)
-        except Exception as e:
-            logger.warning(f"MomentumStrategy error on {symbol}: {e}")
-
-    # ── Mean Reversion (ETFs, gold, stable equities) ──
-    if sym_upper in MEANREV_SYMBOLS:
-        try:
-            sig = _meanrev.generate_signal(df, symbol, current_price, position_qty)
-            if sig.action != "hold":
-                candidates.append(sig)
-        except Exception as e:
-            logger.warning(f"MeanReversionStrategy error on {symbol}: {e}")
 
     if not candidates:
         return None

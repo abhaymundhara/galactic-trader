@@ -22,11 +22,11 @@ class ScalpingStrategy(BaseStrategy):
     def __init__(
         self,
         rsi_period: int = 14,
-        rsi_oversold: float = 32,
-        rsi_overbought: float = 68,
+        rsi_oversold: float = 42,
+        rsi_overbought: float = 58,
         ema_fast: int = 9,
         ema_slow: int = 21,
-        volume_surge_multiplier: float = 1.8,
+        volume_surge_multiplier: float = 1.3,
         tp_pct: float = 0.0035,   # 0.35 %
         sl_pct: float = 0.0050,   # 0.50 %
     ) -> None:
@@ -86,28 +86,39 @@ class ScalpingStrategy(BaseStrategy):
                 self.name,
             )
 
-        # ── ENTRY long ──
         ema_cross_bullish = prev_ema_f <= prev_ema_s and cur_ema_f > cur_ema_s
-        if position_qty == 0 and cur_rsi < self.rsi_oversold and (ema_cross_bullish or cur_ema_f > cur_ema_s) and volume_surge:
-            confidence = min(0.95, 0.65 + (self.rsi_oversold - cur_rsi) / 30)
+        ema_cross_bearish = prev_ema_f >= prev_ema_s and cur_ema_f < cur_ema_s
+        ema_bullish = cur_ema_f > cur_ema_s
+        ema_bearish = cur_ema_f < cur_ema_s
+
+        # ── ENTRY long ──
+        # RSI oversold is the primary trigger; EMA alignment & volume boost confidence.
+        # Works in downtrends too (oversold bounce scalp).
+        if position_qty == 0 and cur_rsi < self.rsi_oversold:
+            ema_boost  = 0.06 if (ema_cross_bullish or ema_bullish) else 0.0
+            vol_boost  = 0.04 if volume_surge else 0.0
+            confidence = min(0.95, 0.66 + (self.rsi_oversold - cur_rsi) / 40 + ema_boost + vol_boost)
             sl = current_price * (1 - sl_pct)
             tp = current_price * (1 + tp_pct)
             return Signal(
                 "buy", confidence, sl, tp,
-                f"Scalp long: RSI={cur_rsi:.1f} oversold, EMA{self.ema_fast}>{self.ema_slow}, vol_surge={volume_surge}",
+                f"Scalp long: RSI={cur_rsi:.1f} oversold, ema_bull={ema_bullish}, vol_surge={volume_surge}",
                 self.name,
             )
 
         # ── ENTRY short ──
-        ema_cross_bearish = prev_ema_f >= prev_ema_s and cur_ema_f < cur_ema_s
-        if position_qty == 0 and cur_rsi > self.rsi_overbought and (ema_cross_bearish or cur_ema_f < cur_ema_s) and volume_surge:
-            confidence = min(0.95, 0.65 + (cur_rsi - self.rsi_overbought) / 30)
+        # RSI overbought is the primary trigger; EMA & volume boost confidence.
+        if position_qty == 0 and cur_rsi > self.rsi_overbought:
+            ema_boost  = 0.06 if (ema_cross_bearish or ema_bearish) else 0.0
+            vol_boost  = 0.04 if volume_surge else 0.0
+            confidence = min(0.95, 0.66 + (cur_rsi - self.rsi_overbought) / 40 + ema_boost + vol_boost)
             sl = current_price * (1 + sl_pct)
             tp = current_price * (1 - tp_pct)
             return Signal(
                 "short", confidence, sl, tp,
-                f"Scalp short: RSI={cur_rsi:.1f} overbought, EMA{self.ema_fast}<{self.ema_slow}, vol_surge={volume_surge}",
+                f"Scalp short: RSI={cur_rsi:.1f} overbought, ema_bear={ema_bearish}, vol_surge={volume_surge}",
                 self.name,
             )
 
-        return Signal("hold", 0.0, None, None, f"Scalp: no setup. RSI={cur_rsi:.1f}", self.name)
+        return Signal("hold", 0.0, None, None,
+            f"Scalp: no setup. RSI={cur_rsi:.1f}, ema_bull={ema_bullish}, vol_surge={volume_surge}", self.name)

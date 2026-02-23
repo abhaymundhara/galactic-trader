@@ -241,7 +241,7 @@ async def api_status():
         "last_account_sync": agent.state.get("last_account_sync", ""),
         "account_sync_error": agent.state.get("account_sync_error", ""),
         "symbols": agent.SYMBOLS,
-        "model": agent.OLLAMA_MODEL,
+        "model": "scalper-strategy",
     }
 
 

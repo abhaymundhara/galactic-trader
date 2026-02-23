@@ -34,7 +34,7 @@ DATA_BASE     = "https://data.alpaca.markets/v2"
 CRYPTO_DATA_BASE = "https://data.alpaca.markets/v1beta3"
 
 # BTC/USD and ETH/USD trade 24/7 on Alpaca; GLD is a stock ETF (market hours only)
-SYMBOLS       = [s.strip() for s in os.getenv("SYMBOLS", "BTC/USD,ETH/USD,SOL/USD,XRP/USDT,DOGE/USDT,GLD,AAPL,NVDA,AMZN,MSFT").split(",") if s.strip()]
+SYMBOLS       = [s.strip() for s in os.getenv("SYMBOLS", "BTC/USD,XAU/USD,ETH/USD,SOL/USD,GLD,AAPL,NVDA,AMZN,MSFT").split(",") if s.strip()]
 MAX_POS       = float(os.getenv("MAX_POSITION_SIZE", "0.10"))
 
 
@@ -472,8 +472,8 @@ headers = {
 }
 
 CRYPTO_SYMBOLS = {
-    "BTC/USD", "ETH/USD", "SOL/USD",
-    "BTC/USDT", "ETH/USDT", "XRP/USDT", "DOGE/USDT",
+    "BTC/USD", "ETH/USD", "SOL/USD","XAU/USD"
+    "BTC/USDT", "ETH/USDT",
 }
 
 
@@ -489,10 +489,7 @@ def normalize_symbol(symbol: str) -> str:
         "DOGEUSD": "DOGE/USD",
         "XRPUSD": "XRP/USD",
         "USDTUSD": "USDT/USD",
-        "BTCUSDT": "BTC/USDT",
-        "ETHUSDT": "ETH/USDT",
-        "XRPUSDT": "XRP/USDT",
-        "DOGEUSDT": "DOGE/USDT",
+        "XAUUSD": "XAU/USD",
     }
     if s in aliases:
         return aliases[s]
@@ -965,7 +962,7 @@ def check_stop_take(symbol: str, price: float) -> str | None:
     """
     Check long and short positions for SL/TP breaches.
     Returns 'sell' (exit long), 'cover' (exit short), or None.
-    Called BEFORE asking the LLM to avoid wasting inference on obvious exits.
+    Called BEFORE strategy evaluation to fast-path obvious exits.
     """
     # ── Long position check ──────────────────────────────────────────────────
     pos = state["positions"].get(symbol)
@@ -1067,7 +1064,7 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
             if quantity < 1:
                 return False
 
-        # ATR-based protective levels (fallback to sanitized LLM/default values).
+        # ATR-based protective levels (fallback to strategy/default values).
         atr = float(state["last_decision"].get(symbol, {}).get("indicators", {}).get("atr", 0.0) or 0.0)
         atr_sl = round(price - ATR_SL_MULT * atr, 4) if atr > 0 else 0.0
         atr_tp = round(price + ATR_TP_MULT * atr, 4) if atr > 0 else 0.0
@@ -1242,7 +1239,7 @@ async def execute_paper_trade(symbol: str, action: str, price: float, reason: st
 async def analyse_symbol(symbol: str):
     """Full analysis -> decision -> optional execution for one symbol."""
     symbol = normalize_symbol(symbol)
-    df = await fetch_bars(symbol)
+    df = await fetch_bars(symbol, limit=100)
     if df.empty:
         print(f"⚠️  No bars for {symbol}")
         return
@@ -1327,7 +1324,7 @@ async def analyse_symbol(symbol: str):
     position       = pos if pos and pos.get("quantity", 0) > 0 else None
     short_pos      = state["short_positions"].get(symbol)
     short_position = short_pos if short_pos and short_pos.get("quantity", 0) > 0 else None
-    # ── Strategy Engine: indicator-based decision (no LLM) ────────────────────
+    # ── Strategy Engine: indicator-based decision ──────────────────────────────
     pos_qty = float((position or {}).get("quantity", 0))
     if short_position and short_position.get("quantity", 0) > 0:
         pos_qty = -float(short_position.get("quantity", 0))
