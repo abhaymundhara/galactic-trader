@@ -137,6 +137,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     "equity_source": equity_source,
                     "last_account_sync": agent.state.get("last_account_sync", ""),
                     "account_sync_error": agent.state.get("account_sync_error", ""),
+                    "active_strategy": agent.state.get("active_strategy", "BBRSI"),
+                    "enforce_daily_loss_limit": bool(agent.state.get("enforce_daily_loss_limit", True)),
+                    "daily_loss_limit_pct": float(agent.state.get("daily_loss_limit_pct", 5.0)),
+                    "multi_trade": bool(agent.state.get("multi_trade", True)),
                 }
                 await websocket.send_json(_json_safe(payload))
             except Exception as ex:
@@ -202,6 +206,48 @@ async def api_candles(symbol: str, limit: int = 60, timeframe: str = "5Min"):
     except Exception as e:
         return {"error": str(e)}
 
+
+
+
+# ── Strategy & Settings endpoints ─────────────────────────────────────────────
+import strategy_engine as _se
+from fastapi import Body
+
+@app.get("/api/strategy")
+async def api_get_strategy():
+    return {
+        "active": _se.get_active_strategy(),
+        "available": list(_se._instances.keys()),
+    }
+
+
+@app.post("/api/strategy")
+async def api_set_strategy(payload: dict = Body(...)):
+    name = str(payload.get("strategy", "")).upper()
+    ok = _se.set_active_strategy(name)
+    if not ok:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Unknown strategy: {name}")
+    agent.state["active_strategy"] = name
+    return {"active": name, "ok": True}
+
+
+@app.get("/api/settings")
+async def api_get_settings():
+    return {
+        "enforce_daily_loss_limit": bool(agent.state.get("enforce_daily_loss_limit", True)),
+        "daily_loss_limit_pct":     float(agent.state.get("daily_loss_limit_pct", 5.0)),
+        "multi_trade":              bool(agent.state.get("multi_trade", True)),
+    }
+
+
+@app.post("/api/settings")
+async def api_update_settings(payload: dict = Body(...)):
+    allowed = {"enforce_daily_loss_limit", "daily_loss_limit_pct", "multi_trade"}
+    for key, val in payload.items():
+        if key in allowed:
+            agent.state[key] = val
+    return {"ok": True, "settings": {k: agent.state.get(k) for k in allowed}}
 
 @app.get("/api/trades")
 async def api_trades(limit: int = 50):

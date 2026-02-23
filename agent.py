@@ -22,7 +22,7 @@ import time as _time
 import metrics as _metrics
 import risk_management as _rm
 from regime import Regime, detect_regime, strategy_for_regime
-from strategy_engine import run_strategies
+from strategy_engine import run_strategies, get_active_strategy
 
 ALPACA_KEY    = os.getenv("ALPACA_API_KEY", "")
 ALPACA_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
@@ -52,7 +52,7 @@ ATR_SL_MULT = float(os.getenv("ATR_SL_MULT", "1.5"))
 ATR_TP_MULT = float(os.getenv("ATR_TP_MULT", "2.5"))
 MIN_VOLUME_RATIO = float(os.getenv("MIN_VOLUME_RATIO", "0.9"))
 MAX_OPEN_RISK = float(os.getenv("MAX_OPEN_RISK", "0.20"))
-DAILY_LOSS_LIMIT_PCT = float(os.getenv("DAILY_LOSS_LIMIT_PCT", "0.03"))
+DAILY_LOSS_LIMIT_PCT = float(os.getenv("DAILY_LOSS_LIMIT_PCT", "0.05"))  # default 5%
 ANALYSIS_INTERVAL_SECONDS = int(os.getenv("ANALYSIS_INTERVAL_SECONDS", "15" if CONTINUOUS_ANALYSIS else "300"))
 
 # Alpaca regulatory fees (paper simulation — deducted to reflect real P&L)
@@ -256,8 +256,13 @@ def update_daily_risk_state(equity_now: float):
     if start_eq <= 0:
         return
     dd = (start_eq - equity_now) / start_eq
-    if dd >= DAILY_LOSS_LIMIT_PCT:
+    # Enforce daily loss limit only if the flag is on
+    limit = float(state.get("daily_loss_limit_pct", DAILY_LOSS_LIMIT_PCT * 100)) / 100
+    if state.get("enforce_daily_loss_limit", True) and dd >= limit:
         state["halt_new_entries"] = True
+    elif not state.get("enforce_daily_loss_limit", True):
+        # If user disabled it, don't halt on loss (only circuit breaker still applies)
+        pass
 
 
 def apply_trailing_stop(symbol: str, price: float):
@@ -457,6 +462,10 @@ state = {
     "risk_day": datetime.utcnow().strftime("%Y-%m-%d"),
     "daily_start_equity": STARTING_CAP,
     "halt_new_entries": False,
+    "daily_loss_limit_pct": 5.0,          # % drawdown from day start that halts trading
+    "enforce_daily_loss_limit": True,      # user can toggle from dashboard
+    "active_strategy": "BBRSI",            # user-selected: DHLAO | 3MACD | BBRSI
+    "multi_trade": True,                   # allow concurrent positions across symbols
     "loss_streak": {},        # symbol -> consecutive closed losses; >=2 triggers cooldown
     "short_positions": {},   # symbol -> {quantity, avg_cost, last_price, stop_loss, take_profit}
     "last_order_error": "",
@@ -1505,7 +1514,11 @@ async def run_agent():
         _metrics.drawdown_gauge.set(_rm.circuit_breaker.current_drawdown(eq))
         _metrics.open_positions_gauge.set(sum(1 for p in state["positions"].values() if p.get("quantity", 0) > 0))
         _metrics.open_shorts_gauge.set(sum(1 for p in state["short_positions"].values() if p.get("quantity", 0) > 0))
-        state["status"] = "running" if IDLE_TIMEOUT_FIX or CONTINUOUS_ANALYSIS else "idle"
+        state["status"] = "running"
+    # Sync active strategy from strategy_engine to state (for WS broadcast)
+    import strategy_engine as _se
+    if state.get("active_strategy") != _se.get_active_strategy():
+        _se.set_active_strategy(state.get("active_strategy", "BBRSI")) if IDLE_TIMEOUT_FIX or CONTINUOUS_ANALYSIS else "idle"
         loop_count      += 1
         state["week"]    = min(6, 1 + loop_count // 2016)
         print(

@@ -743,6 +743,97 @@
         color: var(--text-1);
       }
 
+
+      /* ── Strategy Switcher ──────────────────────────────────────────── */
+      .strategy-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 16px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+      }
+      .strategy-bar-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-4);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        flex-shrink: 0;
+      }
+      .strategy-btn {
+        font-family: Inter, sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 5px 14px;
+        border: 1.5px solid var(--border);
+        border-radius: 20px;
+        background: var(--bg);
+        color: var(--text-2);
+        cursor: pointer;
+        transition: all 0.15s;
+        letter-spacing: 0.3px;
+      }
+      .strategy-btn:hover { background: var(--surface); border-color: #9ca3af; }
+      .strategy-btn.active {
+        background: #111827;
+        color: #fff;
+        border-color: #111827;
+      }
+      .strategy-btn.active.dhlao { background: #dc2626; border-color: #dc2626; }
+      .strategy-btn.active.macd  { background: #2563eb; border-color: #2563eb; }
+      .strategy-btn.active.bbrsi { background: #16a34a; border-color: #16a34a; }
+      .strategy-desc {
+        font-size: 11px;
+        color: var(--text-4);
+        margin-left: 4px;
+      }
+      .toggle-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
+        flex-shrink: 0;
+      }
+      .toggle-label {
+        font-size: 11px;
+        color: var(--text-3);
+        font-weight: 500;
+      }
+      .toggle-switch {
+        position: relative;
+        width: 36px;
+        height: 20px;
+        flex-shrink: 0;
+      }
+      .toggle-switch input { opacity: 0; width: 0; height: 0; }
+      .toggle-slider {
+        position: absolute; inset: 0;
+        background: #d1d5db;
+        border-radius: 20px;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .toggle-slider:before {
+        content: "";
+        position: absolute;
+        width: 14px; height: 14px;
+        left: 3px; top: 3px;
+        background: white;
+        border-radius: 50%;
+        transition: transform 0.2s;
+      }
+      input:checked + .toggle-slider { background: #16a34a; }
+      input:checked + .toggle-slider:before { transform: translateX(16px); }
+      .loss-limit-val {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-1);
+        min-width: 28px;
+        text-align: right;
+      }
+
 </style>
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -812,6 +903,26 @@
             <span class="badge idle" id="status-badge">idle</span>
           </div>
         </div>
+
+
+        <!-- STRATEGY SWITCHER BAR -->
+        <div class="strategy-bar" id="strategy-bar">
+          <span class="strategy-bar-label">Strategy</span>
+          <button class="strategy-btn bbrsi active" id="btn-BBRSI" onclick="switchStrategy('BBRSI')">BBRSI</button>
+          <button class="strategy-btn dhlao" id="btn-DHLAO" onclick="switchStrategy('DHLAO')">DHLAO</button>
+          <button class="strategy-btn macd"  id="btn-3MACD" onclick="switchStrategy('3MACD')">3MACD</button>
+          <span class="strategy-desc" id="strategy-desc">Bollinger Bands + RSI · mean-reversion</span>
+
+          <div class="toggle-wrap">
+            <span class="toggle-label">Daily Loss Limit</span>
+            <span class="loss-limit-val" id="loss-limit-val">5%</span>
+            <label class="toggle-switch" title="Toggle 5% daily loss limit halt">
+              <input type="checkbox" id="loss-limit-toggle" checked onchange="toggleLossLimit(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <!-- /STRATEGY SWITCHER BAR -->
 
         <div class="content">
           <!-- STAT CARDS -->
@@ -1824,6 +1935,118 @@
       };
       // Re-bind patched handler
       if (ws) ws.onmessage = onSocketMessageWithCharts;
+
+
+      // ══ STRATEGY SWITCHER ══════════════════════════════════════════════════
+      const STRATEGY_DESCS = {
+        DHLAO: "Daily High/Low Algo · breakout scalper",
+        "3MACD": "Triple MACD · momentum scalper",
+        BBRSI: "Bollinger Bands + RSI · mean-reversion",
+      };
+      const STRATEGY_CLASSES = { DHLAO: "dhlao", "3MACD": "macd", BBRSI: "bbrsi" };
+
+      let _currentStrategy = "BBRSI";
+      let _stratSwitching = false;
+
+      function updateStrategyUI(name) {
+        _currentStrategy = name;
+        document.querySelectorAll(".strategy-btn").forEach(btn => {
+          btn.classList.remove("active", "dhlao", "macd", "bbrsi");
+          if (btn.id === "btn-" + name) {
+            btn.classList.add("active", STRATEGY_CLASSES[name] || "");
+          }
+        });
+        const descEl = document.getElementById("strategy-desc");
+        if (descEl) descEl.textContent = STRATEGY_DESCS[name] || "";
+      }
+
+      async function switchStrategy(name) {
+        if (_stratSwitching || name === _currentStrategy) return;
+        _stratSwitching = true;
+        const btn = document.getElementById("btn-" + name);
+        if (btn) btn.textContent = "…";
+        try {
+          const r = await fetch("/api/strategy", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ strategy: name }),
+          });
+          const data = await r.json();
+          if (data.ok) {
+            updateStrategyUI(data.active);
+            showToast("Strategy: " + data.active);
+          }
+        } catch(e) {
+          console.error("Strategy switch failed:", e);
+        } finally {
+          _stratSwitching = false;
+          if (btn) btn.textContent = name;
+        }
+      }
+
+      async function toggleLossLimit(enabled) {
+        try {
+          await fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enforce_daily_loss_limit: enabled }),
+          });
+          showToast("Daily loss limit " + (enabled ? "ON (5%)" : "OFF"));
+        } catch(e) {
+          console.error("Settings update failed:", e);
+        }
+      }
+
+      // Simple toast notification
+      function showToast(msg) {
+        let t = document.getElementById("_toast");
+        if (!t) {
+          t = document.createElement("div");
+          t.id = "_toast";
+          t.style.cssText = "position:fixed;bottom:24px;right:24px;background:#111827;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;font-family:Inter,sans-serif;z-index:9999;opacity:0;transition:opacity 0.2s";
+          document.body.appendChild(t);
+        }
+        t.textContent = msg;
+        t.style.opacity = "1";
+        clearTimeout(t._timer);
+        t._timer = setTimeout(() => { t.style.opacity = "0"; }, 2500);
+      }
+
+      // Sync strategy from WS state
+      const _origOnMsg = ws.onmessage;
+      ws.onmessage = function(e) {
+        if (_origOnMsg) _origOnMsg.call(this, e);
+        try {
+          const d = JSON.parse(e.data);
+          if (d.type !== "state") return;
+          if (d.active_strategy && d.active_strategy !== _currentStrategy) {
+            updateStrategyUI(d.active_strategy);
+          }
+          if (typeof d.enforce_daily_loss_limit === "boolean") {
+            const toggle = document.getElementById("loss-limit-toggle");
+            if (toggle && toggle.checked !== d.enforce_daily_loss_limit) {
+              toggle.checked = d.enforce_daily_loss_limit;
+            }
+          }
+          if (typeof d.daily_loss_limit_pct === "number") {
+            const el = document.getElementById("loss-limit-val");
+            if (el) el.textContent = d.daily_loss_limit_pct.toFixed(0) + "%";
+          }
+        } catch {}
+      };
+
+      // Load initial strategy on page load
+      fetch("/api/strategy").then(r => r.json()).then(d => {
+        if (d.active) updateStrategyUI(d.active);
+      }).catch(() => {});
+      fetch("/api/settings").then(r => r.json()).then(d => {
+        const toggle = document.getElementById("loss-limit-toggle");
+        if (toggle && typeof d.enforce_daily_loss_limit === "boolean") {
+          toggle.checked = d.enforce_daily_loss_limit;
+        }
+        const val = document.getElementById("loss-limit-val");
+        if (val && d.daily_loss_limit_pct) val.textContent = d.daily_loss_limit_pct.toFixed(0) + "%";
+      }).catch(() => {});
 
     </script>
   </body>
