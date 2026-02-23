@@ -1,0 +1,360 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// SimpleTrendScalper – ATR  |  Pine Script v5
+// Mirrors the MQ5 EA:  dual EMA crossover entry · ATR SL/TP · break-even
+// trailing stop · time-stop · session filter · daily-loss guard
+// ─────────────────────────────────────────────────────────────────────────────
+//@version=5
+strategy("SimpleTrendScalper – ATR",
+         overlay             = true,
+         default_qty_type    = strategy.fixed,
+         default_qty_value   = 0.01,
+         initial_capital     = 100,
+         currency            = currency.GBP,
+         commission_type     = strategy.commission.percent,
+         commission_value    = 0.01,
+         slippage            = 3)
+
+// ─── EMAs ────────────────────────────────────────────────────────────────────
+g1 = "══ EMAs"
+fastPeriod = input.int  (10,  "Fast EMA period", minval=1, group=g1)
+slowPeriod = input.int  (30,  "Slow EMA period", minval=1, group=g1)
+
+// ─── ATR SL / TP ─────────────────────────────────────────────────────────────
+g2 = "══ ATR  SL / TP"
+atrPeriod = input.int  (14,   "ATR period",  minval=1,            group=g2)
+slMult    = input.float( 2.0, "SL  ×  ATR", minval=0.1, step=0.1, group=g2)
+tpMult    = input.float( 3.0, "TP  ×  ATR", minval=0.1, step=0.1, group=g2)
+
+// ─── Trade management ────────────────────────────────────────────────────────
+g3 = "══ Trade Management"
+beTriggerPts  = input.float(150.0, "Break-even trigger (ticks)", minval=0, group=g3)
+trailStartPts = input.float(200.0, "Trail start (ticks)",         minval=0, group=g3)
+trailStepPts  = input.float( 50.0, "Trail step  (ticks)",         minval=1, group=g3)
+maxBarsHeld   = input.int  ( 20,   "Max bars in trade (0 = off)", minval=0, group=g3)
+
+// ─── Daily loss guard ────────────────────────────────────────────────────────
+g4 = "══ Daily Loss Guard"
+maxDailyLossPct = input.float(50.0, "Max daily loss %", minval=0.1, maxval=100, group=g4)
+
+// ─── Session filter ──────────────────────────────────────────────────────────
+g5 = "══ Session Filter"
+useSession = input.bool(false, "Enable session filter",       group=g5)
+sessStart  = input.int ( 7,   "Start hour (exchange, 0–23)", minval=0, maxval=23, group=g5)
+sessEnd    = input.int (20,   "End   hour (exchange, 0–23)", minval=0, maxval=23, group=g5)
+
+// ─── Backtest window ─────────────────────────────────────────────────────────
+g6 = "══ Backtest Window"
+startDate = input.time(timestamp("2019-01-01 00:00"), "Start", group=g6)
+endDate   = input.time(timestamp("2099-12-31 00:00"), "End",   group=g6)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Indicators
+// ─────────────────────────────────────────────────────────────────────────────
+fastEMA = ta.ema(close, fastPeriod)
+slowEMA = ta.ema(close, slowPeriod)
+atr     = ta.atr(atrPeriod)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Signals
+// ─────────────────────────────────────────────────────────────────────────────
+longSig  = ta.crossover (fastEMA, slowEMA)
+shortSig = ta.crossunder(fastEMA, slowEMA)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gate checks
+// ─────────────────────────────────────────────────────────────────────────────
+inWindow = time >= startDate and time <= endDate
+
+sessOK = not useSession or
+         (sessStart <= sessEnd
+          ? (hour >= sessStart and hour < sessEnd)
+          : (hour >= sessStart or  hour < sessEnd))
+
+// Daily-loss guard
+var float dayStartEquity = na
+var int   lastDay        = na
+isNewDay = na(lastDay) or dayofmonth != lastDay
+if isNewDay
+    dayStartEquity := strategy.equity
+    lastDay        := dayofmonth
+
+dailyDDPct  = dayStartEquity > 0 and strategy.equity < dayStartEquity
+              ? (dayStartEquity - strategy.equity) / dayStartEquity * 100.0
+              : 0.0
+dailyLossOK = dailyDDPct < maxDailyLossPct
+
+canTrade = inWindow and sessOK and dailyLossOK
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trade state  — dynamic SL updated every bar (BE + trailing)
+// ─────────────────────────────────────────────────────────────────────────────
+var int   barsInTrade = 0
+var float dynSL       = na   // current stop-loss price (moves for BE / trail)
+var float fixedTP     = na   // take-profit locked at entry
+
+// reset state when flat
+if strategy.position_size == 0
+    barsInTrade := 0
+    dynSL       := na
+    fixedTP     := na
+else
+    barsInTrade += 1
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entries  (only when flat, so no pyramid)
+// ─────────────────────────────────────────────────────────────────────────────
+if canTrade and longSig and strategy.position_size == 0
+    dynSL   := close - atr * slMult
+    fixedTP := close + atr * tpMult
+    strategy.entry("Long", strategy.long)
+
+if canTrade and shortSig and strategy.position_size == 0
+    dynSL   := close + atr * slMult
+    fixedTP := close - atr * tpMult
+    strategy.entry("Short", strategy.short)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dynamic exit  — ONE strategy.exit per direction, updated each bar
+// Handles: fixed SL/TP · break-even · trailing stop
+// ─────────────────────────────────────────────────────────────────────────────
+tick = syminfo.mintick
+
+if strategy.position_size > 0 and not na(dynSL)
+    profitTicks = (close - strategy.position_avg_price) / tick
+
+    // Break-even: raise SL to entry once profit ≥ trigger
+    if beTriggerPts > 0 and profitTicks >= beTriggerPts
+        dynSL := math.max(dynSL, strategy.position_avg_price)
+
+    // Trailing: raise SL behind close once profit ≥ trail start
+    if trailStartPts > 0 and profitTicks >= trailStartPts
+        dynSL := math.max(dynSL, close - trailStepPts * tick)
+
+    strategy.exit("Long Exit", "Long", stop=dynSL, limit=fixedTP)
+
+if strategy.position_size < 0 and not na(dynSL)
+    profitTicks = (strategy.position_avg_price - close) / tick
+
+    // Break-even: lower SL to entry
+    if beTriggerPts > 0 and profitTicks >= beTriggerPts
+        dynSL := math.min(dynSL, strategy.position_avg_price)
+
+    // Trailing: lower SL behind close
+    if trailStartPts > 0 and profitTicks >= trailStartPts
+        dynSL := math.min(dynSL, close + trailStepPts * tick)
+
+    strategy.exit("Short Exit", "Short", stop=dynSL, limit=fixedTP)
+
+// ─── Time-stop ───────────────────────────────────────────────────────────────
+if maxBarsHeld > 0 and strategy.position_size != 0 and barsInTrade >= maxBarsHeld
+    strategy.close_all(comment="Time-stop (" + str.tostring(maxBarsHeld) + " bars)")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Visuals
+// ─────────────────────────────────────────────────────────────────────────────
+p1 = plot(fastEMA, "Fast EMA", color=#00FFFF,      linewidth=2)
+p2 = plot(slowEMA, "Slow EMA", color=color.orange, linewidth=2)
+fill(p1, p2, color=color.new(color.white, 80), title="EMA fill")
+
+bgcolor(inWindow        ? color.new(color.green, 95) : na, title="Backtest window")
+bgcolor(not dailyLossOK ? color.new(color.red,   85) : na, title="Daily loss hit")
+
+avgEMA = math.avg(fastEMA, slowEMA)
+plot(ta.cross(fastEMA, slowEMA) ? avgEMA : na, "Cross",
+     color=color.red, linewidth=3, style=plot.style_circles)
+
+plotshape(longSig  and canTrade, title="Buy Signal",
+          text="BUY",  textcolor=color.white,
+          style=shape.labelup,   size=size.normal,
+          location=location.belowbar, color=color.rgb(27,  129, 18))
+plotshape(shortSig and canTrade, title="Sell Signal",
+          text="SELL", textcolor=color.white,
+          style=shape.labeldown, size=size.normal,
+          location=location.abovebar, color=color.rgb(255, 87,  51))
+
+// Live SL / TP lines
+plot(not na(dynSL)   ? dynSL   : na, "SL", color=color.new(color.red,   0), style=plot.style_linebr, linewidth=1)
+plot(not na(fixedTP) ? fixedTP : na, "TP", color=color.new(color.green, 0), style=plot.style_linebr, linewidth=1)
+
+strategy("SimpleTrendScalper – ATR",
+         overlay              = true,
+         default_qty_type     = strategy.fixed,
+         default_qty_value    = 0.01,
+         initial_capital      = 100,
+         currency             = currency.GBP,
+         commission_type      = strategy.commission.percent,
+         commission_value     = 0.01,
+         slippage             = 3,
+         process_orders_on_close = true)
+
+// ─── EMAs ────────────────────────────────────────────────────────────────────
+g1 = "══ EMAs"
+fastPeriod = input.int  (10,  "Fast EMA period", minval=1,   group=g1)
+slowPeriod = input.int  (30,  "Slow EMA period", minval=1,   group=g1)
+
+// ─── ATR SL / TP ─────────────────────────────────────────────────────────────
+g2 = "══ ATR  SL / TP"
+atrPeriod  = input.int  (14,   "ATR period",           minval=1,           group=g2)
+slMult     = input.float( 2.0, "SL  ×  ATR",           minval=0.1, step=0.1, group=g2)
+tpMult     = input.float( 3.0, "TP  ×  ATR",           minval=0.1, step=0.1, group=g2)
+
+// ─── Trade management ────────────────────────────────────────────────────────
+g3 = "══ Trade Management"
+beTriggerPts  = input.float(150.0, "Break-even trigger (points)", minval=0, group=g3)
+trailStartPts = input.float(200.0, "Trail start (points)",         minval=0, group=g3)
+trailStepPts  = input.float( 50.0, "Trail step (points)",          minval=1, group=g3)
+maxBarsHeld   = input.int  ( 20,   "Max bars in trade (0 = off)",  minval=0, group=g3)
+
+// ─── Daily loss guard ────────────────────────────────────────────────────────
+g4 = "══ Daily Loss Guard"
+maxDailyLossPct = input.float(50.0, "Max daily loss %", minval=0.1, maxval=100, group=g4)
+
+// ─── Session filter ──────────────────────────────────────────────────────────
+g5 = "══ Session Filter"
+useSession = input.bool(false, "Enable session filter",      group=g5)
+sessStart  = input.int ( 7,   "Start hour  (exchange 0-23)", minval=0, maxval=23, group=g5)
+sessEnd    = input.int (20,   "End   hour  (exchange 0-23)", minval=0, maxval=23, group=g5)
+
+// ─── Backtest window ─────────────────────────────────────────────────────────
+g6 = "══ Backtest Window"
+startDate = input.time(timestamp("2019-01-01 00:00"), "Start", group=g6)
+endDate   = input.time(timestamp("2099-12-31 00:00"), "End",   group=g6)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Indicators
+// ─────────────────────────────────────────────────────────────────────────────
+fastEMA = ta.ema(close, fastPeriod)
+slowEMA = ta.ema(close, slowPeriod)
+atr     = ta.atr(atrPeriod)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Signals  (true crossover / crossunder — matches MQ5 GetTrendDirection logic)
+// ─────────────────────────────────────────────────────────────────────────────
+// Dead-band: ignore crosses where EMAs are within 2 points (avoids chop)
+emaGap     = math.abs(fastEMA - slowEMA)
+validCross = emaGap >= 2 * syminfo.mintick
+
+longSig  = ta.crossover (fastEMA, slowEMA) and validCross
+shortSig = ta.crossunder(fastEMA, slowEMA) and validCross
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gate checks
+// ─────────────────────────────────────────────────────────────────────────────
+inWindow = time >= startDate and time <= endDate
+
+sessOK = not useSession or
+         (sessStart <= sessEnd
+          ? (hour >= sessStart and hour < sessEnd)
+          : (hour >= sessStart or  hour < sessEnd))   // overnight window
+
+// ─── Daily-loss guard ────────────────────────────────────────────────────────
+// Track equity at start of each session day
+var float dayStartEquity = na
+var int   lastDay        = na
+
+currentDay = dayofweek   // proxy for "new day" (Pine resets on each bar)
+isNewDay   = na(lastDay) or dayofmonth != lastDay
+
+if isNewDay
+    dayStartEquity := strategy.equity
+    lastDay        := dayofmonth
+
+equityNow   = strategy.equity
+dailyDDPct  = dayStartEquity > 0 and equityNow < dayStartEquity
+              ? (dayStartEquity - equityNow) / dayStartEquity * 100.0
+              : 0.0
+dailyLossOK = dailyDDPct < maxDailyLossPct
+
+canTrade = inWindow and sessOK and dailyLossOK
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bar counter for time-stop
+// ─────────────────────────────────────────────────────────────────────────────
+var int barsInTrade = 0
+if strategy.position_size != 0
+    barsInTrade += 1
+else
+    barsInTrade := 0
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entries + ATR exits
+// ─────────────────────────────────────────────────────────────────────────────
+if canTrade and longSig
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", from_entry="Long",
+                  stop         = close - atr * slMult,
+                  limit        = close + atr * tpMult,
+                  trail_points = trailStartPts,
+                  trail_offset = trailStepPts)
+    barsInTrade := 0
+
+if canTrade and shortSig
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", from_entry="Short",
+                  stop         = close + atr * slMult,
+                  limit        = close - atr * tpMult,
+                  trail_points = trailStartPts,
+                  trail_offset = trailStepPts)
+    barsInTrade := 0
+
+// ─── Break-even (synthetic — move stop to entry once profit ≥ BE trigger) ────
+// Pine strategy.exit doesn't have native BE, so we re-issue the exit order
+// with a tighter stop once the threshold is crossed.
+if strategy.position_size > 0
+    profitPts = (close - strategy.position_avg_price) / syminfo.mintick
+    if profitPts >= beTriggerPts
+        strategy.exit("Long BE", from_entry="Long",
+                      stop         = strategy.position_avg_price,
+                      limit        = strategy.position_avg_price + atr * tpMult,
+                      trail_points = trailStartPts,
+                      trail_offset = trailStepPts)
+
+if strategy.position_size < 0
+    profitPts = (strategy.position_avg_price - close) / syminfo.mintick
+    if profitPts >= beTriggerPts
+        strategy.exit("Short BE", from_entry="Short",
+                      stop         = strategy.position_avg_price,
+                      limit        = strategy.position_avg_price - atr * tpMult,
+                      trail_points = trailStartPts,
+                      trail_offset = trailStepPts)
+
+// ─── Time-stop ───────────────────────────────────────────────────────────────
+if maxBarsHeld > 0 and strategy.position_size != 0 and barsInTrade >= maxBarsHeld
+    strategy.close_all(comment="Time-stop (" + str.tostring(maxBarsHeld) + " bars)")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Visuals
+// ─────────────────────────────────────────────────────────────────────────────
+p1 = plot(fastEMA, "Fast EMA", color=#00FFFF,      linewidth=2)
+p2 = plot(slowEMA, "Slow EMA", color=color.orange, linewidth=2)
+fill(p1, p2, color=color.new(color.white, 80), title="EMA fill")
+
+// Backtest window background
+bgcolor(inWindow ? color.new(color.green, 95) : na, title="Backtest window")
+
+// Daily-loss guard warning
+bgcolor(not dailyLossOK ? color.new(color.red, 85) : na, title="Daily loss hit")
+
+// EMA cross dot
+avgEMA    = math.avg(fastEMA, slowEMA)
+crossMark = ta.cross(fastEMA, slowEMA) and validCross
+plot(crossMark ? avgEMA : na, "Cross", color=color.red, linewidth=3, style=plot.style_circles)
+
+// BUY / SELL labels
+plotshape(longSig  and canTrade, title="Buy Signal",
+          text="BUY",  textcolor=color.white,
+          style=shape.labelup,   size=size.normal,
+          location=location.belowbar, color=color.rgb(27,  129, 18))
+plotshape(shortSig and canTrade, title="Sell Signal",
+          text="SELL", textcolor=color.white,
+          style=shape.labeldown, size=size.normal,
+          location=location.abovebar, color=color.rgb(255, 87,  51))
+
+// ATR SL/TP visualisation on the current bar
+slLine = strategy.position_size > 0  ? strategy.position_avg_price - atr * slMult :
+         strategy.position_size < 0  ? strategy.position_avg_price + atr * slMult : na
+tpLine = strategy.position_size > 0  ? strategy.position_avg_price + atr * tpMult :
+         strategy.position_size < 0  ? strategy.position_avg_price - atr * tpMult : na
+
+plot(slLine, "SL", color=color.new(color.red,   0), style=plot.style_linebr, linewidth=1)
+plot(tpLine, "TP", color=color.new(color.green, 0), style=plot.style_linebr, linewidth=1)

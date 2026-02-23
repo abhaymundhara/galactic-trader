@@ -1,9 +1,11 @@
 """MT5 Bridge — receives trade events from GalacticBridge.mq5 and logs them."""
 import os
 from datetime import datetime
-from fastapi import APIRouter, Request, HTTPException, Header
 from typing import Optional
+
 import aiosqlite
+from fastapi import APIRouter, Header, HTTPException, Request
+
 from database import DB_PATH
 
 router = APIRouter()
@@ -12,30 +14,30 @@ MT5_API_KEY = os.getenv("MT5_BRIDGE_KEY", "mt5secret")
 
 
 async def _init_mt5_tables():
-    """Create MT5 trade log table (called from main lifespan)."""
+    """Create MT5 trade log table and account snapshot table."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS mt5_trades (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                received_at TEXT    NOT NULL,
-                event       TEXT    NOT NULL,   -- open | close
-                ticket      INTEGER NOT NULL,
-                symbol      TEXT    NOT NULL,
-                side        TEXT    NOT NULL,   -- buy | sell
-                lots        REAL    NOT NULL,
-                open_price  REAL    NOT NULL DEFAULT 0,
-                close_price REAL    NOT NULL DEFAULT 0,
-                sl          REAL    NOT NULL DEFAULT 0,
-                tp          REAL    NOT NULL DEFAULT 0,
-                profit      REAL    NOT NULL DEFAULT 0,
-                strategy    TEXT,
-                open_time   TEXT,
-                close_time  TEXT,
-                account     TEXT,
-                broker      TEXT
+                received_at  TEXT    NOT NULL,
+                event        TEXT    NOT NULL,
+                ticket       INTEGER NOT NULL,
+                symbol       TEXT    NOT NULL,
+                side         TEXT    NOT NULL,
+                lots         REAL    NOT NULL,
+                open_price   REAL    NOT NULL DEFAULT 0,
+                close_price  REAL    NOT NULL DEFAULT 0,
+                sl           REAL    NOT NULL DEFAULT 0,
+                tp           REAL    NOT NULL DEFAULT 0,
+                profit       REAL    NOT NULL DEFAULT 0,
+                strategy     TEXT,
+                open_time    TEXT,
+                close_time   TEXT,
+                account      TEXT,
+                broker       TEXT
             )
         """)
-        # ── Migration: fix pre-EA-fix close records that had inverted sides ──
+
         await db.execute("""
             UPDATE mt5_trades
             SET side = (
@@ -43,15 +45,16 @@ async def _init_mt5_tables():
                 WHERE o.ticket = mt5_trades.ticket
                   AND o.event  = 'open'
                 LIMIT 1
-             )
+            )
             WHERE event = 'close'
-              AND EXISTQ 
-          SEELECT 1D�M mt5_trades o
+              AND EXISTS (
+                SELECT 1 FROM mt5_trades o
                 WHERE o.ticket = mt5_trades.ticket
                   AND o.event  = 'open'
                   AND o.side  != mt5_trades.side
-             )
+              )
         """)
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS mt5_account (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,7 +102,7 @@ async def get_mt5_stats(account: Optional[str] = None):
         db.row_factory = aiosqlite.Row
 
         row = await (await db.execute(
-            f"SELECT COUST(*) as n, SUM(profit) as total_profit FROM mt5_trades WHERE event='close' {acct_filter}",
+            f"SELECT COUNT(*) as n, SUM(profit) as total_profit FROM mt5_trades WHERE event='close' {acct_filter}",
             acct_param
         )).fetchone()
         total_closed = row["n"] or 0
@@ -163,7 +166,7 @@ async def get_mt5_stats(account: Optional[str] = None):
         "win_rate": win_rate,
         "avg_win": avg_win_val,
         "avg_loss": avg_loss_val,
-        "risk_reward": rr.
+        "risk_reward": rr,
         "equity_curve": equity,
         "daily_pnl": daily_pnl,
         "by_strategy": by_strategy,
@@ -242,7 +245,7 @@ async def receive_mt5_trade(
                (received_at, event, ticket, symbol, side, lots,
                 open_price, close_price, sl, tp, profit,
                 strategy, open_time, close_time, account, broker)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 datetime.utcnow().isoformat(),
                 payload.get("event", "open"),
@@ -325,7 +328,7 @@ async def api_mt5_account(account: Optional[str] = None):
         db.row_factory = aiosqlite.Row
         if account and account != "all":
             row = await (await db.execute(
-                "SELECT * FROM mt5_account WHERE account=? ORDER BY current_id DESC LIMIT 1",
+                "SELECT * FROM mt5_account WHERE account=? ORDER BY id DESC LIMIT 1",
                 (account,)
             )).fetchone()
         else:

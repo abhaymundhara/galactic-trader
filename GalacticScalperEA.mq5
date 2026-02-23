@@ -1,490 +1,541 @@
 //+------------------------------------------------------------------+
-//|  GalacticScalperEA.mq5                                           |
-//|  High-frequency multi-confirmation scalper                       |
-//|  Designed for XAUUSD | M1 entries | H1 trend filter              |
-//|  Target: 70 %+ win rate, 20-60 trades/day                        |
-//|  Pushes every trade to Galactic Trader via GalacticBridge logic   |
+//|                                       SimpleTrendScalper_ATR.mq5 |
+//| M15 trend scalper with % risk, ATR SL/TP, BE, trailing & timeout |
+//|  DEMO USE ONLY                                                   |
 //+------------------------------------------------------------------+
-#property copyright "Galactic Trader"
-#property version   "2.10"
 #property strict
 
-//── Inputs ────────────────────────────────────────────────────────────────────
-input group "=== Risk Management ==="
-input double RiskPercent       =  1.0;   // % of balance risked per trade
-input double MaxDailyLossPct   =  3.0;   // Close all & stop if day-loss hits X%
-input int    MaxTradesPerDay   = 50;     // Hard cap on daily trade count
-input int    MaxOpenPositions  =  3;     // Concurrent open positions allowed
+//--- Inputs: money management
+input double RiskPerTradePercent  = 0.5;   // % equity risked per trade
+input int    MaxOpenPositions     = 30;    // max open trades by this EA
+input int    MaxTradesPerDay      = 50000; // cap so it doesn't go crazy
+input double MinLots              = 0.01;  // user lot min
+input double MaxLots              = 1.00;  // user lot max
+input double MaxDailyLossPercent  = 50.0;   // stop opening new trades after this DD (% of day start equity)
 
-input group "=== Strategy Parameters ==="
-input int    RSI_Period        =  7;     // RSI period (fast for scalping)
-input int    BB_Period         = 20;     // Bollinger Band period
-input double BB_Dev            =  2.0;   // Bollinger Band std-dev
-input int    ATR_Period        = 14;     // ATR period
-input double TP_ATR_Mult       =  1.2;   // TP = ATR × this
-input double SL_ATR_Mult       =  1.8;   // SL = ATR × this
-input double BE_Trigger_Pct    =  0.5;   // Move SL to BE when this % of TP reached
-input int    Stoch_K           =  5;     // Stochastic %K
-input int    Stoch_D           =  3;     // Stochastic %D
-input int    Stoch_Slowing     =  3;     // Stochastic slowing
-input int    EMA_Trend_Period  = 200;    // H1 EMA for trend filter
-input int    EMA_Fast          = 21;     // M1 fast EMA (structure)
-input int    EMA_Slow          = 50;     // M1 slow EMA (structure)
+//--- Inputs: trade parameters
+input ENUM_TIMEFRAMES TradeTF     = PERIOD_M15; // trading timeframe (M15 recommended)
+input int    FastMAPeriod         = 10;
+input int    SlowMAPeriod         = 30;
 
-input group "=== Session Filter (GMT) ==="
-input int    LondonOpen        =  7;     // London session open hour (GMT)
-input int    LondonClose       = 12;     // London session close hour (GMT)
-input int    NYOpen            = 13;     // New York session open hour (GMT)
-input int    NYClose           = 17;     // New York session close hour (GMT)
-input bool   TradeAsiaSession  = false;  // Also trade Tokyo session (02-05 GMT)
+//--- ATR-based dynamic SL/TP
+input int    ATRPeriod            = 14;    // ATR period on TradeTF
+input double SL_ATR_Multiplier    = 2.0;   // SL distance = ATR * this
+input double TP_ATR_Multiplier    = 3.0;   // TP distance = ATR * this
 
-input group "=== Filters ==="
-input int    MaxSpreadPoints   = 35;     // Skip if spread > X points (XAUUSD ~25 normal)
-input bool   UseBreakeven      = true;   // Auto move SL to breakeven
-input bool   UseTrailingStop   = true;   // ATR-based trailing stop
-input double Trail_ATR_Mult    =  0.8;   // Trailing distance = ATR × this
-input string EA_Comment        = "GalacticScalper"; // Order comment / strategy tag
+//--- Trade management (break-even & trailing) in *points*
+input double BE_TriggerPoints     = 150.0; // move SL to BE after this profit
+input double TrailStartPoints     = 200.0; // start trailing after this profit
+input double TrailStepPoints      = 50.0;  // trail distance in points
 
-input group "=== Galactic Bridge ==="
-input string GT_HOST           = "127.0.0.1";
-input int    GT_PORT           =  8080;
-input string GT_API_KEY        = "mt5secret";
-input bool   GT_LOG            = true;
+//--- Time stop: close trade after N bars if neither SL nor TP hit
+input int    MaxBarsInTrade       = 20;    // e.g. 20 M15 bars = 300 minutes
 
-//── Globals ───────────────────────────────────────────────────────────────────
-int    h_rsi_m1, h_bb_m1, h_atr_m1, h_stoch_m1;
-int    h_ema_fast_m1, h_ema_slow_m1;
-int    h_ema_trend_h1;
+//--- Optional session filter (server time)
+input bool   UseSessionFilter     = false; // if true, only trade between hours below
+input int    SessionStartHour     = 7;     // e.g. 7 = 07:00
+input int    SessionEndHour       = 20;    // e.g. 20 = 20:00 (8 PM)
 
-datetime lastBarTime   = 0;
-int      dailyTrades   = 0;
-double   dayStartBal   = 0;
-datetime dayStartDate  = 0;
-datetime lastAccountPush = 0;   // throttle account pushes to every 5 s
+//--- Magic number
+input long   MagicNumber          = 112233;
 
-//── Init ──────────────────────────────────────────────────────────────────────
+//--- indicator handles
+int fastMAHandle = INVALID_HANDLE;
+int slowMAHandle = INVALID_HANDLE;
+int atrHandle    = INVALID_HANDLE;
+
+//--- daily tracking
+datetime tradingDayDate = 0;
+double   dayStartEquity = 0.0;
+int      tradesToday    = 0;
+
+//+------------------------------------------------------------------+
+//| Return just the date (midnight) for a datetime                   |
+//+------------------------------------------------------------------+
+datetime DateOfDay(datetime t)
+{
+   MqlDateTime st;
+   TimeToStruct(t, st);
+   st.hour = 0;
+   st.min  = 0;
+   st.sec  = 0;
+   return StructToTime(st);
+}
+
+//+------------------------------------------------------------------+
+//| Check if time is within session                                  |
+//+------------------------------------------------------------------+
+bool IsWithinSession(datetime t)
+{
+   if(!UseSessionFilter)
+      return true;
+
+   MqlDateTime st;
+   TimeToStruct(t, st);
+   int hour = st.hour;
+
+   if(SessionStartHour <= SessionEndHour)
+   {
+      // normal case, e.g. 7 -> 20
+      return (hour >= SessionStartHour && hour < SessionEndHour);
+   }
+   else
+   {
+      // overnight window, e.g. 22 -> 5
+      return (hour >= SessionStartHour || hour < SessionEndHour);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| OnInit                                                           |
+//+------------------------------------------------------------------+
 int OnInit()
 {
-    // M1 indicators
-    h_rsi_m1       = iRSI   (_Symbol, PERIOD_M1, RSI_Period, PRICE_CLOSE);
-    h_bb_m1        = iBands (_Symbol, PERIOD_M1, BB_Period, 0, BB_Dev, PRICE_CLOSE);
-    h_atr_m1       = iATR   (_Symbol, PERIOD_M1, ATR_Period);
-    h_stoch_m1     = iStochastic(_Symbol, PERIOD_M1, Stoch_K, Stoch_D, Stoch_Slowing,
-                                  MODE_SMA, STO_LOWHIGH);
-    h_ema_fast_m1  = iMA    (_Symbol, PERIOD_M1, EMA_Fast, 0, MODE_EMA, PRICE_CLOSE);
-    h_ema_slow_m1  = iMA    (_Symbol, PERIOD_M1, EMA_Slow, 0, MODE_EMA, PRICE_CLOSE);
+   fastMAHandle = iMA(_Symbol, TradeTF, FastMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   slowMAHandle = iMA(_Symbol, TradeTF, SlowMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   atrHandle    = iATR(_Symbol, TradeTF, ATRPeriod);
 
-    // H1 trend filter
-    h_ema_trend_h1 = iMA    (_Symbol, PERIOD_H1, EMA_Trend_Period, 0, MODE_EMA, PRICE_CLOSE);
+   if(fastMAHandle == INVALID_HANDLE ||
+      slowMAHandle == INVALID_HANDLE ||
+      atrHandle    == INVALID_HANDLE)
+   {
+      Print("Failed to create indicator handles");
+      return(INIT_FAILED);
+   }
 
-    if (h_rsi_m1 == INVALID_HANDLE || h_bb_m1 == INVALID_HANDLE ||
-        h_atr_m1 == INVALID_HANDLE || h_stoch_m1 == INVALID_HANDLE ||
-        h_ema_trend_h1 == INVALID_HANDLE)
-    {
-        Print("GalacticScalperEA: Failed to create indicator handles");
-        return INIT_FAILED;
-    }
+   datetime now = TimeCurrent();
+   tradingDayDate = DateOfDay(now);
+   dayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+   tradesToday    = 0;
 
-    dayStartBal  = AccountInfoDouble(ACCOUNT_BALANCE);
-    dayStartDate = iTime(_Symbol, PERIOD_D1, 0);
-
-    Print("GalacticScalperEA v2.10 initialised on ", _Symbol,
-          " | Risk=", RiskPercent, "% | MaxTrades=", MaxTradesPerDay);
-    return INIT_SUCCEEDED;
+   Print("SimpleTrendScalper_ATR initialized on ", _Symbol,
+         " TF=", EnumToString(TradeTF),
+         " dayStartEquity=", DoubleToString(dayStartEquity,2));
+   return(INIT_SUCCEEDED);
 }
 
+//+------------------------------------------------------------------+
+//| OnDeinit                                                         |
+//+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-    IndicatorRelease(h_rsi_m1);
-    IndicatorRelease(h_bb_m1);
-    IndicatorRelease(h_atr_m1);
-    IndicatorRelease(h_stoch_m1);
-    IndicatorRelease(h_ema_fast_m1);
-    IndicatorRelease(h_ema_slow_m1);
-    IndicatorRelease(h_ema_trend_h1);
-    Print("GalacticScalperEA detached.");
+   if(fastMAHandle != INVALID_HANDLE) IndicatorRelease(fastMAHandle);
+   if(slowMAHandle != INVALID_HANDLE) IndicatorRelease(slowMAHandle);
+   if(atrHandle    != INVALID_HANDLE) IndicatorRelease(atrHandle);
 }
 
-//── Main tick ─────────────────────────────────────────────────────────────────
-void OnTick()
-{
-    // ── Only act on new M1 bar close ─────────────────────────────────────────
-    datetime barTime = iTime(_Symbol, PERIOD_M1, 0);
-    if (barTime == lastBarTime) {
-        // Between bars: manage open positions (breakeven, trail) + push account
-        ManagePositions();
-        if (TimeCurrent() - lastAccountPush >= 5) {
-            GT_PushAccount();
-            lastAccountPush = TimeCurrent();
-        }
-        return;
-    }
-    lastBarTime = barTime;
-
-    // ── Reset daily counters at new day ──────────────────────────────────────
-    datetime todayOpen = iTime(_Symbol, PERIOD_D1, 0);
-    if (todayOpen != dayStartDate) {
-        dailyTrades  = 0;
-        dayStartBal  = AccountInfoDouble(ACCOUNT_BALANCE);
-        dayStartDate = todayOpen;
-    }
-
-    // ── Daily loss circuit breaker ────────────────────────────────────────────
-    double currentBal  = AccountInfoDouble(ACCOUNT_BALANCE);
-    double dailyLossPct = (dayStartBal - currentBal) / dayStartBal * 100.0;
-    if (dailyLossPct >= MaxDailyLossPct) {
-        if (GT_LOG) Print("GalacticScalperEA: Daily loss limit hit (",
-                           DoubleToString(dailyLossPct, 2), "%) — closing all & pausing.");
-        CloseAllPositions();
-        return;
-    }
-
-    // ── Hard caps ─────────────────────────────────────────────────────────────
-    if (dailyTrades >= MaxTradesPerDay) return;
-    if (CountOpenPositions() >= MaxOpenPositions) return;
-
-    // ── Session filter ────────────────────────────────────────────────────────
-    if (!IsInSession()) return;
-
-    // ── Spread filter ─────────────────────────────────────────────────────────
-    long spreadPts = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-    if (spreadPts > MaxSpreadPoints) return;
-
-    // ── Read indicators (bar 1 = last closed bar) ─────────────────────────────
-    double rsi[3], bbUpper[2], bbMid[2], bbLower[2], atr[2];
-    double stochK[3], stochD[3];
-    double emaFast[2], emaSlow[2], emaTrendH1[2];
-    double closeM1[3], openM1[2];
-
-    if (!FetchBuffer(h_rsi_m1,      rsi,        3)) return;
-    if (!FetchBuffer(h_bb_m1,       bbUpper,    2, UPPER_BAND))  return;
-    if (!FetchBuffer(h_bb_m1,       bbMid,      2, BASE_LINE))   return;
-    if (!FetchBuffer(h_bb_m1,       bbLower,    2, LOWER_BAND))  return;
-    if (!FetchBuffer(h_atr_m1,      atr,        2)) return;
-    if (!FetchBuffer(h_stoch_m1,    stochK,     3, 0)) return;
-    if (!FetchBuffer(h_stoch_m1,    stochD,     3, 1)) return;
-    if (!FetchBuffer(h_ema_fast_m1, emaFast,    2)) return;
-    if (!FetchBuffer(h_ema_slow_m1, emaSlow,    2)) return;
-    if (!FetchBuffer(h_ema_trend_h1,emaTrendH1, 2)) return;
-
-    if (CopyClose(_Symbol, PERIOD_M1, 0, 3, closeM1) < 3) return;
-    if (CopyOpen (_Symbol, PERIOD_M1, 1, 2, openM1)  < 2) return;
-
-    double price   = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double atrVal  = atr[1];
-    if (atrVal == 0) return;
-
-    // ── Compute signals ───────────────────────────────────────────────────────
-    bool   trendUp   = closeM1[1] > emaTrendH1[1];   // H1 EMA200 trend
-    bool   trendDown = closeM1[1] < emaTrendH1[1];
-
-    bool   structUp  = emaFast[1] > emaSlow[1];       // M1 EMA21 > EMA50
-    bool   structDn  = emaFast[1] < emaSlow[1];
-
-    // RSI crossed from oversold / overbought on closed bar
-    bool rsiOversoldCross  = rsi[2] < 30.0 && rsi[1] >= 30.0;   // crossed UP through 30
-    bool rsiOverboughtCross= rsi[2] > 70.0 && rsi[1] <= 70.0;   // crossed DOWN through 70
-
-    // Stochastic K crosses D in oversold/overbought zone
-    bool stochBuyCross  = stochK[2] < stochD[2] && stochK[1] > stochD[1] && stochK[1] < 40.0;
-    bool stochSellCross = stochK[2] > stochD[2] && stochK[1] < stochD[1] && stochK[1] > 60.0;
-
-    // Price near Bollinger bands (within 30% of ATR)
-    bool nearLowerBB = closeM1[1] <= (bbLower[1] + atrVal * 0.3);
-    bool nearUpperBB = closeM1[1] >= (bbUpper[1] - atrVal * 0.3);
-
-    // Confirmation candle (last closed bar direction)
-    bool bullCandle = closeM1[1] > openM1[1];
-    bool bearCandle = closeM1[1] < openM1[1];
-
-    // RSI not yet back in extreme zone (avoids chasing)
-    bool rsiNotOverbought = rsi[1] < 65.0;
-    bool rsiNotOversold   = rsi[1] > 35.0;
-
-    // ── BUY conditions ────────────────────────────────────────────────────────
-    bool buySignal = trendUp          // H1 in uptrend
-                  && structUp         // M1 structure bullish
-                  && (rsiOversoldCross || (rsi[1] < 35.0 && stochBuyCross))
-                  && nearLowerBB      // price near / below lower BB
-                  && bullCandle;      // confirmation candle
-
-    // ── SELL conditions ───────────────────────────────────────────────────────
-    bool sellSignal = trendDown
-                   && structDn
-                   && (rsiOverboughtCross || (rsi[1] > 65.0 && stochSellCross))
-                   && nearUpperBB
-                   && bearCandle;
-
-    // ── Execute ───────────────────────────────────────────────────────────────
-    if (buySignal  && !HasOpenPosition(POSITION_TYPE_BUY))  OpenTrade(ORDER_TYPE_BUY,  atrVal);
-    if (sellSignal && !HasOpenPosition(POSITION_TYPE_SELL)) OpenTrade(ORDER_TYPE_SELL, atrVal);
-}
-
-//── Open a trade ──────────────────────────────────────────────────────────────
-void OpenTrade(ENUM_ORDER_TYPE type, double atrVal)
-{
-    double ask    = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    double bid    = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double price  = (type == ORDER_TYPE_BUY) ? ask : bid;
-    double point  = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-    int    digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-
-    double slDist = atrVal * SL_ATR_Mult;
-    double tpDist = atrVal * TP_ATR_Mult;
-
-    double sl, tp;
-    if (type == ORDER_TYPE_BUY) {
-        sl = NormalizeDouble(price - slDist, digits);
-        tp = NormalizeDouble(price + tpDist, digits);
-    } else {
-        sl = NormalizeDouble(price + slDist, digits);
-        tp = NormalizeDouble(price - tpDist, digits);
-    }
-
-    // Lot size from risk %
-    double lots = CalcLots(slDist);
-    if (lots <= 0) return;
-
-    MqlTradeRequest req = {};
-    MqlTradeResult  res = {};
-    req.action    = TRADE_ACTION_DEAL;
-    req.symbol    = _Symbol;
-    req.volume    = lots;
-    req.type      = type;
-    req.price     = price;
-    req.sl        = sl;
-    req.tp        = tp;
-    req.deviation = 10;
-    req.magic     = 202600;
-    req.comment   = EA_Comment;
-    req.type_filling = ORDER_FILLING_IOC;
-
-    if (!OrderSend(req, res)) {
-        Print("GalacticScalperEA: OrderSend failed — retcode=", res.retcode,
-              " desc=", res.comment);
-        return;
-    }
-    if (res.retcode != TRADE_RETCODE_DONE && res.retcode != TRADE_RETCODE_PLACED) {
-        Print("GalacticScalperEA: Trade not filled — retcode=", res.retcode);
-        return;
-    }
-
-    dailyTrades++;
-    string sideStr = (type == ORDER_TYPE_BUY) ? "buy" : "sell";
-    Print("GalacticScalperEA: Opened ", sideStr, " | lot=", lots,
-          " | entry=", price, " | SL=", sl, " | TP=", tp,
-          " | ATR=", atrVal, " | ticket=", res.order);
-
-    // Push to Galactic Trader dashboard
-    GT_PushOpen(res.order, _Symbol, sideStr, lots, price, sl, tp);
-}
-
-//── Manage open positions (breakeven + trail) ─────────────────────────────────
-void ManagePositions()
-{
-    double atrBuf[2];
-    if (!FetchBuffer(h_atr_m1, atrBuf, 2)) return;
-    double atrVal = atrBuf[1];
-    if (atrVal == 0) return;
-
-    for (int i = PositionsTotal() - 1; i >= 0; i--) {
-        ulong ticket = PositionGetTicket(i);
-        if (!PositionSelectByTicket(ticket)) continue;
-        if (PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-        if (PositionGetInteger(POSITION_MAGIC) != 202600) continue;
-
-        double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-        double currentSL = PositionGetDouble(POSITION_SL);
-        double tp        = PositionGetDouble(POSITION_TP);
-        double bid       = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-        double ask       = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-        ENUM_POSITION_TYPE ptype = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-        int    digits    = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-        double point     = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-
-        double tpDist    = MathAbs(tp - openPrice);
-        double newSL     = currentSL;
-
-        if (ptype == POSITION_TYPE_BUY) {
-            double profit  = bid - openPrice;
-            // Breakeven: move SL to entry + 1 point when halfway to TP
-            if (UseBreakeven && profit >= tpDist * BE_Trigger_Pct &&
-                currentSL < openPrice) {
-                newSL = NormalizeDouble(openPrice + point, digits);
-            }
-            // Trail: move SL up behind price by Trail_ATR_Mult * ATR
-            if (UseTrailingStop) {
-                double trailSL = NormalizeDouble(bid - atrVal * Trail_ATR_Mult, digits);
-                if (trailSL > newSL) newSL = trailSL;
-            }
-        } else {
-            double profit  = openPrice - ask;
-            if (UseBreakeven && profit >= tpDist * BE_Trigger_Pct &&
-                currentSL > openPrice) {
-                newSL = NormalizeDouble(openPrice - point, digits);
-            }
-            if (UseTrailingStop) {
-                double trailSL = NormalizeDouble(ask + atrVal * Trail_ATR_Mult, digits);
-                if (trailSL < newSL || currentSL == 0) newSL = trailSL;
-            }
-        }
-
-        if (newSL != currentSL && newSL > 0) {
-            MqlTradeRequest req = {};
-            MqlTradeResult  res = {};
-            req.action   = TRADE_ACTION_SLTP;
-            req.symbol   = _Symbol;
-            req.position = ticket;
-            req.sl       = newSL;
-            req.tp       = tp;
-            if (!OrderSend(req, res))
-                Print("GalacticScalperEA: SL/TP modify failed — ticket=", ticket,
-                      " retcode=", res.retcode, " desc=", res.comment);
-        }
-    }
-}
-
-//── Utility: lot size based on risk% and SL distance ─────────────────────────
-double CalcLots(double slDist)
-{
-    double balance    = AccountInfoDouble(ACCOUNT_BALANCE);
-    double riskAmount = balance * RiskPercent / 100.0;
-    double tickVal    = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-    double tickSize   = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-    if (tickVal == 0 || tickSize == 0 || slDist == 0) return 0;
-
-    double lotsRaw    = riskAmount / (slDist / tickSize * tickVal);
-    double lotStep    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-    double lotMin     = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-    double lotMax     = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-
-    double lots = MathFloor(lotsRaw / lotStep) * lotStep;
-    lots = MathMax(lotMin, MathMin(lotMax, lots));
-    return lots;
-}
-
-//── Utility: count open positions for this EA + symbol ───────────────────────
+//+------------------------------------------------------------------+
+//| Count open positions for this EA and symbol                      |
+//+------------------------------------------------------------------+
 int CountOpenPositions()
 {
-    int count = 0;
-    for (int i = 0; i < PositionsTotal(); i++) {
-        if (PositionGetSymbol(i) == _Symbol &&
-            PositionGetInteger(POSITION_MAGIC) == 202600) count++;
-    }
-    return count;
+   int total = PositionsTotal();
+   int count = 0;
+
+   for(int i = 0; i < total; i++)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+
+      long   magic = (long)PositionGetInteger(POSITION_MAGIC);
+      string sym   = (string)PositionGetString(POSITION_SYMBOL);
+
+      if(magic == MagicNumber && sym == _Symbol)
+         count++;
+   }
+   return count;
 }
 
-bool HasOpenPosition(ENUM_POSITION_TYPE ptype)
+//+------------------------------------------------------------------+
+//| Calculate lot size from % risk and SL distance                   |
+//+------------------------------------------------------------------+
+double CalculateLotSize(double slDistance)
 {
-    for (int i = 0; i < PositionsTotal(); i++) {
-        if (PositionGetSymbol(i) != _Symbol) continue;
-        if (PositionGetInteger(POSITION_MAGIC) != 202600) continue;
-        if ((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) == ptype) return true;
-    }
-    return false;
+   if(slDistance <= 0)
+      return 0.0;
+
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(equity <= 0)
+      return 0.0;
+
+   double riskAmount = equity * (RiskPerTradePercent / 100.0);
+
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double point     = _Point;
+
+   if(tickValue <= 0 || tickSize <= 0 || point <= 0)
+      return 0.0;
+
+   double valuePerPointPerLot = tickValue / tickSize * point;
+   double slPoints            = slDistance / point;
+   if(slPoints <= 0)
+      return 0.0;
+
+   double riskPerLot = slPoints * valuePerPointPerLot; // currency risk for 1 lot
+   if(riskPerLot <= 0)
+      return 0.0;
+
+   double lots = riskAmount / riskPerLot;
+
+   // symbol volume limits
+   double minLotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   double minLotSym  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLotSym  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+
+   double minAllowed = MinLots;
+   double maxAllowed = MaxLots;
+
+   if(minLotSym > 0)
+      minAllowed = MathMax(minAllowed, minLotSym);
+   if(maxLotSym > 0)
+      maxAllowed = MathMin(maxAllowed, maxLotSym);
+
+   lots = MathMax(lots, minAllowed);
+   lots = MathMin(lots, maxAllowed);
+
+   if(minLotStep > 0)
+      lots = MathRound(lots / minLotStep) * minLotStep;
+
+   lots = NormalizeDouble(lots, 2);
+
+   Print("Calculated lots=", DoubleToString(lots,2),
+         " risk=", DoubleToString(RiskPerTradePercent,2), "%, slDistance=",
+         DoubleToString(slDistance/_Point,1)," pts");
+   return lots;
 }
 
-void CloseAllPositions()
+//+------------------------------------------------------------------+
+//| Open a trade                                                     |
+//+------------------------------------------------------------------+
+bool OpenTrade(ENUM_ORDER_TYPE type, double lots, double slDistance, double tpDistance)
 {
-    for (int i = PositionsTotal() - 1; i >= 0; i--) {
-        ulong ticket = PositionGetTicket(i);
-        if (!PositionSelectByTicket(ticket)) continue;
-        if (PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-        if (PositionGetInteger(POSITION_MAGIC) != 202600) continue;
+   MqlTradeRequest req;
+   MqlTradeResult  res;
+   ZeroMemory(req);
+   ZeroMemory(res);
 
-        MqlTradeRequest req = {};
-        MqlTradeResult  res = {};
-        req.action   = TRADE_ACTION_DEAL;
-        req.symbol   = _Symbol;
-        req.position = ticket;
-        req.volume   = PositionGetDouble(POSITION_VOLUME);
-        req.type     = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
-                       ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
-        req.price    = (req.type == ORDER_TYPE_SELL)
-                       ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
-                       : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-        req.deviation = 20;
-        req.type_filling = ORDER_FILLING_IOC;
-        if (!OrderSend(req, res))
-            Print("GalacticScalperEA: Close failed — ticket=", ticket,
-                  " retcode=", res.retcode, " desc=", res.comment);
-    }
+   double price;
+   if(type == ORDER_TYPE_BUY)
+      price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   else
+      price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+   if(price <= 0)
+      return false;
+
+   double sl, tp;
+   if(type == ORDER_TYPE_BUY)
+   {
+      sl = price - slDistance;
+      tp = price + tpDistance;
+   }
+   else
+   {
+      sl = price + slDistance;
+      tp = price - tpDistance;
+   }
+
+   req.action       = TRADE_ACTION_DEAL;
+   req.symbol       = _Symbol;
+   req.type         = type;
+   req.volume       = lots;
+   req.price        = price;
+   req.sl           = NormalizeDouble(sl, _Digits);
+   req.tp           = NormalizeDouble(tp, _Digits);
+   req.deviation    = 30;
+   req.magic        = MagicNumber;
+   req.type_filling = ORDER_FILLING_FOK;
+
+   if(!OrderSend(req, res))
+   {
+      Print("OrderSend failed. Error=", GetLastError());
+      return false;
+   }
+
+   if(res.retcode != TRADE_RETCODE_DONE &&
+      res.retcode != TRADE_RETCODE_PLACED)
+   {
+      Print("OrderSend retcode=", res.retcode);
+      return false;
+   }
+
+   Print("Opened ", EnumToString(type),
+         " lots=", DoubleToString(lots,2),
+         " price=", DoubleToString(price,_Digits),
+         " SL=", DoubleToString(sl,_Digits),
+         " TP=", DoubleToString(tp,_Digits),
+         " ticket=", res.order);
+   return true;
 }
 
-//── Session filter ────────────────────────────────────────────────────────────
-bool IsInSession()
+//+------------------------------------------------------------------+
+//| Get trend direction from fast/slow EMA                           |
+//+------------------------------------------------------------------+
+int GetTrendDirection()
 {
-    MqlDateTime t;
-    TimeGMT(t);
-    int h = t.hour;
+   double fastBuf[2], slowBuf[2];
+   if(CopyBuffer(fastMAHandle, 0, 0, 2, fastBuf) != 2) return 0;
+   if(CopyBuffer(slowMAHandle, 0, 0, 2, slowBuf) != 2) return 0;
 
-    bool london = (h >= LondonOpen  && h < LondonClose);
-    bool ny     = (h >= NYOpen      && h < NYClose);
-    bool asia   = TradeAsiaSession && (h >= 2 && h < 5);
-    return london || ny || asia;
+   double fast = fastBuf[0];
+   double slow = slowBuf[0];
+
+   // small no-trade band to avoid chop
+   if(MathAbs(fast - slow) < (2 * _Point))
+      return 0;
+
+   if(fast > slow) return 1;   // uptrend
+   if(fast < slow) return -1;  // downtrend
+   return 0;
 }
 
-//── Buffer helper ─────────────────────────────────────────────────────────────
-bool FetchBuffer(int handle, double &buf[], int count, int bufIdx = 0)
+//+------------------------------------------------------------------+
+//| Manage open positions: BE, trailing, time-stop                   |
+//+------------------------------------------------------------------+
+void ManageOpenPositions()
 {
-    ArraySetAsSeries(buf, true);
-    if (CopyBuffer(handle, bufIdx, 0, count, buf) < count) return false;
-    return true;
+   int total = PositionsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+
+      long   magic = (long)PositionGetInteger(POSITION_MAGIC);
+      string sym   = (string)PositionGetString(POSITION_SYMBOL);
+
+      if(magic != MagicNumber || sym != _Symbol)
+         continue;
+
+      int    type       = (int)PositionGetInteger(POSITION_TYPE);
+      double priceOpen  = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl         = PositionGetDouble(POSITION_SL);
+      double tp         = PositionGetDouble(POSITION_TP);
+      double volume     = PositionGetDouble(POSITION_VOLUME);
+      datetime timeOpen = (datetime)PositionGetInteger(POSITION_TIME);
+
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      if(bid <= 0 || ask <= 0)
+         continue;
+
+      double currentPrice = (type == POSITION_TYPE_BUY ? bid : ask);
+      double profitPoints = (currentPrice - priceOpen) / _Point;
+      if(type == POSITION_TYPE_SELL)
+         profitPoints = (priceOpen - currentPrice) / _Point;
+
+      //--- time stop: close trade after MaxBarsInTrade bars
+      if(MaxBarsInTrade > 0)
+      {
+         int tfSeconds = PeriodSeconds(TradeTF);
+         if(tfSeconds > 0)
+         {
+            int barsHeld = (int)((TimeCurrent() - timeOpen) / tfSeconds);
+            if(barsHeld >= MaxBarsInTrade)
+            {
+               MqlTradeRequest cReq;
+               MqlTradeResult  cRes;
+               ZeroMemory(cReq);
+               ZeroMemory(cRes);
+
+               cReq.action   = TRADE_ACTION_DEAL;
+               cReq.symbol   = _Symbol;
+               cReq.position = ticket;
+               cReq.volume   = volume;
+               cReq.type     = (type == POSITION_TYPE_BUY ? ORDER_TYPE_SELL : ORDER_TYPE_BUY);
+               cReq.price    = (type == POSITION_TYPE_BUY ? bid : ask);
+               cReq.deviation= 30;
+               cReq.magic    = MagicNumber;
+
+               if(!OrderSend(cReq, cRes))
+               {
+                  Print("Failed to close timed-out position ticket=", ticket,
+                        " err=", GetLastError());
+               }
+               else
+               {
+                  Print("Closed timed-out position ticket=", ticket,
+                        " after barsHeld=", barsHeld);
+               }
+               continue; // move to next position
+            }
+         }
+      }
+
+      double newSL = sl;
+
+      //--- move to break-even
+      if(BE_TriggerPoints > 0 && profitPoints >= BE_TriggerPoints)
+      {
+         double bePrice = priceOpen;
+         if(type == POSITION_TYPE_BUY)
+         {
+            if(sl < bePrice)
+               newSL = bePrice;
+         }
+         else // SELL
+         {
+            if(sl > bePrice || sl == 0.0)
+               newSL = bePrice;
+         }
+      }
+
+      //--- trailing stop
+      if(TrailStartPoints > 0 && TrailStepPoints > 0 && profitPoints >= TrailStartPoints)
+      {
+         double trailPrice;
+         if(type == POSITION_TYPE_BUY)
+            trailPrice = currentPrice - TrailStepPoints * _Point;
+         else
+            trailPrice = currentPrice + TrailStepPoints * _Point;
+
+         if(type == POSITION_TYPE_BUY)
+         {
+            if(trailPrice > newSL)
+               newSL = trailPrice;
+         }
+         else // SELL
+         {
+            if(newSL == 0.0 || trailPrice < newSL)
+               newSL = trailPrice;
+         }
+      }
+
+      //--- apply SL change if needed
+      if(newSL != sl && newSL > 0.0)
+      {
+         MqlTradeRequest req;
+         MqlTradeResult  res;
+         ZeroMemory(req);
+         ZeroMemory(res);
+
+         req.action   = TRADE_ACTION_SLTP;
+         req.symbol   = _Symbol;
+         req.position = ticket;
+         req.sl       = NormalizeDouble(newSL, _Digits);
+         req.tp       = tp;
+
+         if(!OrderSend(req, res))
+         {
+            Print("Modify SL failed. Ticket=", ticket,
+                  " Error=", GetLastError());
+         }
+      }
+   }
 }
-//── Galactic Trader bridge push (account snapshot) ───────────────────────
-void GT_PushAccount() {
-    char   req_body[], resp_body[];
-    string resp_headers;
-    double balance     = AccountInfoDouble(ACCOUNT_BALANCE);
-    double equity      = AccountInfoDouble(ACCOUNT_EQUITY);
-    double margin      = AccountInfoDouble(ACCOUNT_MARGIN);
-    double freeMargin  = AccountInfoDouble(ACCOUNT_FREEMARGIN);
-    double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
-    double floatPnl    = equity - balance;
-    string currency    = AccountInfoString(ACCOUNT_CURRENCY);
-    int    openPos     = PositionsTotal();
-    string body = StringFormat(
-        "{\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,"
-        "\"free_margin\":%.2f,\"margin_level\":%.2f,\"float_pnl\":%.2f,"
-        "\"open_positions\":%d,\"account\":\"%I64u\","
-        "\"broker\":\"%s\",\"currency\":\"%s\"}",
-        balance, equity, margin, freeMargin, marginLevel, floatPnl,
-        openPos, AccountInfoInteger(ACCOUNT_LOGIN),
-        AccountInfoString(ACCOUNT_COMPANY), currency
-    );
-    StringToCharArray(body, req_body, 0, StringLen(body));
-    string url     = "http://" + GT_HOST + ":" + IntegerToString(GT_PORT) + "/api/mt5/account";
-    string headers = "Content-Type: application/json\r\nX-API-Key: " + GT_API_KEY + "\r\n";
-    int res = WebRequest("POST", url, headers, 5000, req_body, resp_body, resp_headers);
-    if (res == -1 && GT_LOG)
-        Print("GalacticScalperEA: account push failed — add ", url, " to allowed URLs");
-}
-//── Galactic Trader bridge push (open event only) ────────────────────────────
-void GT_PushOpen(ulong ticket, string symbol, string side,
-                 double lots, double price, double sl, double tp)
+
+//+------------------------------------------------------------------+
+//| OnTick: manage trades, risk check, then one trade per new bar    |
+//+------------------------------------------------------------------+
+void OnTick()
 {
-    char   req_body[], resp_body[];
-    string resp_headers;
-    string ts = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS);
-    string body = StringFormat(
-        "{\"event\":\"open\",\"ticket\":%I64u,\"symbol\":\"%s\",\"side\":\"%s\","
-        "\"lots\":%.5f,\"open_price\":%.5f,\"close_price\":0,"
-        "\"sl\":%.5f,\"tp\":%.5f,\"profit\":0,"
-        "\"strategy\":\"%s\",\"open_time\":\"%s\",\"close_time\":\"\","
-        "\"account\":\"%I64u\",\"broker\":\"%s\"}",
-        ticket, symbol, side, lots, price, sl, tp,
-        EA_Comment, ts,
-        AccountInfoInteger(ACCOUNT_LOGIN),
-        AccountInfoString(ACCOUNT_COMPANY)
-    );
-    StringToCharArray(body, req_body, 0, StringLen(body));
-    string url     = "http://" + GT_HOST + ":" + IntegerToString(GT_PORT) + "/api/mt5/trade";
-    string headers = "Content-Type: application/json\r\nX-API-Key: " + GT_API_KEY + "\r\n";
-    int res = WebRequest("POST", url, headers, 5000, req_body, resp_body, resp_headers);
-    if (GT_LOG) {
-        if (res == -1)
-            Print("GT push failed — add ", url, " to Expert Advisors allowed URLs");
-        else
-            Print("GT push OK → ", CharArrayToString(resp_body));
-    }
+   datetime now    = TimeCurrent();
+   double   equity = AccountInfoDouble(ACCOUNT_EQUITY);
+
+   //--- new day reset
+   datetime today = DateOfDay(now);
+   if(today != tradingDayDate)
+   {
+      tradingDayDate = today;
+      dayStartEquity = equity;
+      tradesToday    = 0;
+      Print("New day, reset tradesToday. Equity=", DoubleToString(equity,2));
+   }
+
+   //--- manage existing trades (BE, trailing, time-stop)
+   ManageOpenPositions();
+
+   //--- daily loss guard (only count drawdown, ignore profit; reset if weird)
+   if(MaxDailyLossPercent > 0.0)
+   {
+      // safety: if start equity is invalid or equity collapsed/changed massively (e.g. new demo),
+      // re-anchor the dayStartEquity to current equity
+      if(dayStartEquity <= 0.0 || equity <= 0.0)
+      {
+         dayStartEquity = equity;
+         tradesToday    = 0;
+         Print("Daily-loss guard: resetting dayStartEquity to ", DoubleToString(equity,2), " (invalid previous value)");
+      }
+
+      double ddPct = 0.0;
+      if(equity < dayStartEquity && dayStartEquity > 0.0)
+      {
+         ddPct = (dayStartEquity - equity) / dayStartEquity * 100.0;
+      }
+      else
+      {
+         // in profit or flat -> no drawdown
+         ddPct = 0.0;
+      }
+
+      PrintFormat("DD check: dayStartEquity=%.2f, equity=%.2f, ddPct=%.2f",
+                  dayStartEquity, equity, ddPct);
+
+      if(ddPct >= MaxDailyLossPercent)
+      {
+         Print("MaxDailyLossPercent reached: ", DoubleToString(ddPct,2),
+               "%. No new trades today.");
+         return;
+      }
+   }
+
+   //--- trades per day cap
+   if(tradesToday >= MaxTradesPerDay)
+      return;
+
+   //--- optional session filter
+   if(!IsWithinSession(now))
+      return;
+
+   //--- detect new bar on TradeTF
+   datetime barTime = iTime(_Symbol, TradeTF, 0);
+   static datetime lastBarTime = 0;
+
+   if(barTime == 0)
+      return;
+   if(barTime == lastBarTime)
+      return; // same bar, do nothing
+
+   lastBarTime = barTime;
+
+   //--- position limit
+   int openCount = CountOpenPositions();
+   if(openCount >= MaxOpenPositions)
+      return;
+
+   //--- get trend direction
+   int dir = GetTrendDirection(); // 1=BUY, -1=SELL, 0=none
+   if(dir == 0)
+      return;
+
+   //--- ATR-based SL/TP distances
+   double atrBuf[1];
+   if(CopyBuffer(atrHandle, 0, 0, 1, atrBuf) != 1)
+   {
+      Print("Failed to get ATR");
+      return;
+   }
+   double atr = atrBuf[0];
+   if(atr <= 0)
+      return;
+
+   double slDistance = atr * SL_ATR_Multiplier;
+   double tpDistance = atr * TP_ATR_Multiplier;
+   if(slDistance <= 0 || tpDistance <= 0)
+      return;
+
+   //--- dynamic lot size
+   double lots = CalculateLotSize(slDistance);
+   if(lots <= 0)
+      return;
+
+   bool ok = false;
+   if(dir == 1)
+      ok = OpenTrade(ORDER_TYPE_BUY, lots, slDistance, tpDistance);
+   else if(dir == -1)
+      ok = OpenTrade(ORDER_TYPE_SELL, lots, slDistance, tpDistance);
+
+   if(ok)
+      tradesToday++;
 }
+//+------------------------------------------------------------------+
