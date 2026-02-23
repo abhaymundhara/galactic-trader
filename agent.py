@@ -1,4 +1,4 @@
-"""Galactic Trader — LLM-powered paper trading agent."""
+"""Galactic Trader — strategy-engine powered paper trading agent."""
 import asyncio
 import json
 import os
@@ -11,9 +11,8 @@ from ta.trend import ADXIndicator, EMAIndicator, MACD
 from ta.volatility import AverageTrueRange, BollingerBands
 from ta.volume import VolumeWeightedAveragePrice
 from datetime import datetime, timedelta
-from typing import Any, cast
+from typing import Any
 from dotenv import load_dotenv
-import ollama
 import database as db
 
 load_dotenv()
@@ -23,6 +22,7 @@ import time as _time
 import metrics as _metrics
 import risk_management as _rm
 from regime import Regime, detect_regime, strategy_for_regime
+from strategy_engine import run_strategies
 
 ALPACA_KEY    = os.getenv("ALPACA_API_KEY", "")
 ALPACA_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
@@ -33,7 +33,6 @@ ALPACA_BASE   = "https://paper-api.alpaca.markets/v2"
 DATA_BASE     = "https://data.alpaca.markets/v2"
 CRYPTO_DATA_BASE = "https://data.alpaca.markets/v1beta3"
 
-OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 # BTC/USD and ETH/USD trade 24/7 on Alpaca; GLD is a stock ETF (market hours only)
 SYMBOLS       = [s.strip() for s in os.getenv("SYMBOLS", "BTC/USD,ETH/USD,SOL/USD,XRP/USDT,DOGE/USDT,GLD,AAPL,NVDA,AMZN,MSFT").split(",") if s.strip()]
 MAX_POS       = float(os.getenv("MAX_POSITION_SIZE", "0.10"))
@@ -962,122 +961,6 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     }
 
 
-def build_prompt(symbol: str, indicators: dict, position: dict | None,
-                 higher_tf: dict | None = None, regime: str = "range",
-                 short_position: dict | None = None) -> str:
-    """
-    Prompt for LLM trading decisions. Supports both long and short positions.
-    Actions: buy (go long), sell (exit long), short (go short), cover (exit short), hold.
-    """
-    asset_type  = "crypto" if is_crypto(symbol) else "stock/ETF"
-    price       = indicators["price"]
-    can_short   = not is_crypto(symbol)
-
-    if position and position.get("quantity", 0) > 0:
-        entry  = position["avg_cost"]
-        qty    = position["quantity"]
-        pnl    = (price - entry) * qty
-        sl_str = f"${position.get('stop_loss'):.4f}" if position.get("stop_loss") else "none"
-        tp_str = f"${position.get('take_profit'):.4f}" if position.get("take_profit") else "none"
-        pos_text         = f"LONG {qty} units @ avg ${entry:.4f} | P&L: ${pnl:.2f} | SL: {sl_str} | TP: {tp_str}"
-        available_actions = '"sell" (exit long) | "hold"'
-    elif short_position and short_position.get("quantity", 0) > 0:
-        entry  = short_position["avg_cost"]
-        qty    = short_position["quantity"]
-        pnl    = (entry - price) * qty          # profit when price falls
-        sl_str = f"${short_position.get('stop_loss'):.4f}" if short_position.get("stop_loss") else "none"
-        tp_str = f"${short_position.get('take_profit'):.4f}" if short_position.get("take_profit") else "none"
-        pos_text         = f"SHORT {qty} units @ avg ${entry:.4f} | P&L: ${pnl:.2f} | SL: {sl_str} | TP: {tp_str}"
-        available_actions = '"cover" (close short) | "hold"'
-    else:
-        pos_text = "No open position."
-        available_actions = '"buy" (go long) | "short" (go short, stocks only) | "hold"' if can_short else '"buy" (go long) | "hold"'
-
-    if can_short:
-        rules_block = """1. BUY  — price ≥ VWAP, MACD > signal, EMA9 > EMA21, RSI 35–65, ADX > 15
-2. SHORT (stocks only) — price < VWAP, MACD < signal, EMA9 < EMA21, RSI 35–65, ADX > 15
-3. Every BUY:   stop_loss 1.5–2.5% BELOW entry, take_profit ≥ 3% ABOVE entry (min 2:1 R:R)
-4. Every SHORT: stop_loss 1.5–2.5% ABOVE entry, take_profit ≥ 3% BELOW entry (min 2:1 R:R)
-5. Pyramid ONLY if price > avg_cost for longs; ONLY if price < avg_cost for shorts
-6. Auto-exits handled by system — only choose "sell"/"cover" when rules are clearly met
-7. High conviction only — confidence < 0.65 = hold; only the clearest setups
-8. Only output actions listed in "Available actions" above"""
-    else:
-        rules_block = """1. BUY (crypto long-only) — use confluence, not perfect alignment:
-   treat as valid when at least 3 bullish confirmations align:
-   price ≥ VWAP (if VWAP is valid), MACD ≥ signal, EMA9 ≥ EMA21, RSI 35–70, ADX ≥ 10, higher TF bullish
-2. If volume data is missing/zero, do NOT reject a setup for that reason alone
-3. In range regime, allow either:
-   bullish momentum continuation (EMA9≥EMA21 and MACD≥signal) OR pullback buy (RSI 35–45 with MACD improving)
-4. Every BUY: stop_loss 1.5–2.5% BELOW entry, take_profit ≥ 3% ABOVE entry (min 2:1 R:R)
-5. Auto-exits are handled by system — choose "sell" only for clear invalidation/exit logic
-6. High conviction only — confidence < 0.65 = hold; only the clearest setups
-7. Only output actions listed in "Available actions" above"""
-
-    return f"""Disciplined algo trader — {symbol} ({asset_type}) paper session.
-
-Indicators:
-- Price: ${price} | EMA9: {indicators["ema9"]} | EMA21: {indicators["ema21"]} ({indicators["ema_cross"]})
-- RSI: {indicators["rsi"]} | MACD: {indicators["macd"]} / Signal: {indicators["macd_signal"]}
-- ATR: {indicators.get("atr", 0)} | ADX: {indicators.get("adx", 0)} | BB width: {indicators.get("bb_width", 0)}
-- VWAP: {indicators.get("vwap", 0)} | Volume ratio: {indicators.get("volume_ratio", 0)}
-- Higher TF EMA cross (15m): {(higher_tf or {}).get("ema_cross", "unknown")}
-- Market regime: {regime}
-Position: {pos_text}
-Available actions: {available_actions}
-
-Rules (strictly enforced):
-{rules_block}
-
-Respond with ONLY valid JSON, no markdown:
-{{"action":"buy"|"sell"|"short"|"cover"|"hold","confidence":0.0-1.0,"reasoning":"one sentence","stop_loss":0.0,"take_profit":0.0}}
-For SHORT: stop_loss = price ABOVE entry (cuts loss if rises), take_profit = price BELOW entry
-For BUY:   stop_loss = price BELOW entry, take_profit = price ABOVE entry
-stop_loss and take_profit are 0.0 for hold actions"""
-
-
-async def ask_llm(symbol: str, indicators: dict, position: dict | None,
-                  higher_tf: dict | None = None, regime: str = "range",
-                  short_position: dict | None = None) -> dict:
-    """Ask Ollama for a trading decision."""
-    prompt = build_prompt(symbol, indicators, position, higher_tf=higher_tf, regime=regime,
-                          short_position=short_position)
-    try:
-        client = ollama.AsyncClient()
-        _llm_t0 = _time.monotonic()
-        response = await client.chat(
-            model=OLLAMA_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            options={"temperature": 0.2},
-            keep_alive="10m",
-        )
-        _metrics.llm_latency.observe(_time.monotonic() - _llm_t0)
-        text = ""
-        if isinstance(response, dict):
-            text = str(response.get("message", {}).get("content", "")).strip()
-        elif hasattr(response, "__aiter__"):
-            chunks = []
-            async for chunk in cast(Any, response):
-                if isinstance(chunk, dict):
-                    chunks.append(str(chunk.get("message", {}).get("content", "")))
-            text = "".join(chunks).strip()
-        else:
-            text = str(response).strip()
-
-        if not text:
-            raise ValueError("Empty response from model")
-
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        return json.loads(text.strip())
-    except Exception as ex:
-        print(f"LLM error for {symbol}: {ex}")
-        return {"action": "hold", "confidence": 0.0, "reasoning": f"LLM error: {ex}",
-                "stop_loss": 0.0, "take_profit": 0.0}
-
-
 def check_stop_take(symbol: str, price: float) -> str | None:
     """
     Check long and short positions for SL/TP breaches.
@@ -1374,11 +1257,11 @@ async def analyse_symbol(symbol: str):
         if not htf_df.empty:
             higher_tf = compute_indicators(htf_df)
     rich_regime = get_rich_regime(indicators, higher_tf)
-    regime = infer_regime(indicators, higher_tf)   # legacy string for build_prompt compatibility
+    regime = infer_regime(indicators, higher_tf)
     _metrics.regime_gauge.labels(symbol=symbol).set(
         {Regime.SIDEWAYS: 0, Regime.BULL: 1, Regime.BEAR: 2, Regime.VOLATILE: 3}.get(rich_regime, 0)
     )
-    # If volatile regime, skip LLM and hold — signals are too noisy
+    # If volatile regime, hold — signals are too noisy
     if rich_regime == Regime.VOLATILE:
         state["last_decision"][symbol] = {
             "action": "hold", "confidence": 0.5,
@@ -1404,7 +1287,7 @@ async def analyse_symbol(symbol: str):
     if ADD_ALL_FIVE:
         apply_trailing_stop(symbol, price)
 
-    # Fast-path: check SL/TP before burning LLM tokens.
+    # Fast-path: check SL/TP before strategy evaluation.
     # Returns "sell" (exit long), "cover" (exit short), or None.
     forced_exit = check_stop_take(symbol, price)
     if forced_exit:
@@ -1444,8 +1327,21 @@ async def analyse_symbol(symbol: str):
     position       = pos if pos and pos.get("quantity", 0) > 0 else None
     short_pos      = state["short_positions"].get(symbol)
     short_position = short_pos if short_pos and short_pos.get("quantity", 0) > 0 else None
-    decision = await ask_llm(symbol, indicators, position, higher_tf=higher_tf, regime=regime,
-                             short_position=short_position)
+    # ── Strategy Engine: indicator-based decision (no LLM) ────────────────────
+    pos_qty = float((position or {}).get("quantity", 0))
+    if short_position and short_position.get("quantity", 0) > 0:
+        pos_qty = -float(short_position.get("quantity", 0))
+    _sig = run_strategies(symbol, df, price, pos_qty)
+    if _sig:
+        decision = {
+            "action":      _sig.action,
+            "confidence":  _sig.confidence,
+            "reasoning":   _sig.reasoning,
+            "stop_loss":   _sig.stop_loss  or 0.0,
+            "take_profit": _sig.take_profit or 0.0,
+        }
+    else:
+        decision = {"action": "hold", "confidence": 0.0, "reasoning": "No strategy signal", "stop_loss": 0.0, "take_profit": 0.0}
 
     action     = decision.get("action", "hold")
     confidence = decision.get("confidence", 0.0)
@@ -1560,7 +1456,6 @@ async def run_agent():
     await fetch_open_positions()
     state["running"] = True
     state["status"]  = "running"
-    print(f"🚀 Galactic Trader started | symbols={SYMBOLS} | model={OLLAMA_MODEL}")
     print(f"   Paper API: {ALPACA_BASE}")
     print(f"   Data  API: {DATA_BASE}")
 
