@@ -871,115 +871,252 @@
         min-width: 28px;
         text-align: right;
       }
-    
-      /* ── MT5 Bridge page ──────────────────────────────────────────── */
-      .mt5-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; margin-bottom:20px; }
-      .mt5-stat { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; }
-      .mt5-stat .label { font-size:11px; color:var(--text-3); margin-bottom:4px; }
-      .mt5-stat .val   { font-size:22px; font-weight:700; }
-      .mt5-stat .sub   { font-size:11px; color:var(--text-3); margin-top:2px; }
-      .mt5-chart-row   { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px; }
-      .mt5-chart-box   { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
-      .mt5-chart-title { font-size:12px; font-weight:600; color:var(--text-3); margin-bottom:10px; }
-      .mt5-chart-canvas{ width:100%; height:220px; }
-      .mt5-table-wrap  { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
-      .mt5-table-scroll { overflow-x:auto; width:100%; }
-      .mt5-table-header{ padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
-      .mt5-table-header .title { font-size:13px; font-weight:600; }
-      .mt5-table        { width:100%; border-collapse:collapse; font-size:12px; }
-      .mt5-table th     { background:var(--bg); padding:8px 12px; text-align:left; font-weight:600; color:var(--text-3); font-size:11px; border-bottom:1px solid var(--border); }
-      .mt5-table td     { padding:8px 12px; border-bottom:1px solid var(--border-light); }
-      .mt5-table tr:last-child td { border-bottom:none; }
-      .mt5-badge-buy    { background:var(--green-bg); color:var(--green); padding:2px 7px; border-radius:4px; font-weight:600; font-size:11px; }
-      .mt5-badge-sell   { background:var(--red-bg);   color:var(--red);   padding:2px 7px; border-radius:4px; font-weight:600; font-size:11px; }
-      .mt5-badge-open   { background:var(--blue-bg);  color:var(--blue);  padding:2px 7px; border-radius:4px; font-weight:600; font-size:11px; }
-      .mt5-badge-close  { background:var(--yellow-bg);color:var(--yellow);padding:2px 7px; border-radius:4px; font-weight:600; font-size:11px; }
-      .mt5-profit-pos   { color:var(--green); font-weight:600; }
-      .mt5-profit-neg   { color:var(--red);   font-weight:600; }
-      .mt5-empty        { text-align:center; color:var(--text-4); padding:40px; font-size:12px; }
-      .mt5-conn-row     { display:flex; align-items:center; gap:8px; background:var(--blue-bg); border:1px solid var(--blue-border); border-radius:var(--radius); padding:10px 14px; margin-bottom:16px; font-size:12px; color:var(--blue); }
 
+      /* ── MT5 Bridge page ──────────────────────────────────────────── */
+      .mt5-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      .mt5-stat {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 14px 16px;
+      }
+      .mt5-stat .label {
+        font-size: 11px;
+        color: var(--text-3);
+        margin-bottom: 4px;
+      }
+      .mt5-stat .val {
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .mt5-stat .sub {
+        font-size: 11px;
+        color: var(--text-3);
+        margin-top: 2px;
+      }
+      .mt5-chart-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      .mt5-chart-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px;
+      }
+      .mt5-chart-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-3);
+        margin-bottom: 10px;
+      }
+      .mt5-canvas-wrap {
+        position: relative;
+        height: 220px;
+        width: 100%;
+      }
+      .mt5-chart-canvas {
+        display: block;
+      }
+      .mt5-table-wrap {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      .mt5-table-scroll {
+        overflow-x: auto;
+        width: 100%;
+      }
+      .mt5-table-header {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .mt5-table-header .title {
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .mt5-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .mt5-table th {
+        background: var(--bg);
+        padding: 8px 12px;
+        text-align: left;
+        font-weight: 600;
+        color: var(--text-3);
+        font-size: 11px;
+        border-bottom: 1px solid var(--border);
+      }
+      .mt5-table td {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-light);
+      }
+      .mt5-table tr:last-child td {
+        border-bottom: none;
+      }
+      .mt5-badge-buy {
+        background: var(--green-bg);
+        color: var(--green);
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 11px;
+      }
+      .mt5-badge-sell {
+        background: var(--red-bg);
+        color: var(--red);
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 11px;
+      }
+      .mt5-badge-open {
+        background: var(--blue-bg);
+        color: var(--blue);
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 11px;
+      }
+      .mt5-badge-close {
+        background: var(--yellow-bg);
+        color: var(--yellow);
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 11px;
+      }
+      .mt5-profit-pos {
+        color: var(--green);
+        font-weight: 600;
+      }
+      .mt5-profit-neg {
+        color: var(--red);
+        font-weight: 600;
+      }
+      .mt5-empty {
+        text-align: center;
+        color: var(--text-4);
+        padding: 40px;
+        font-size: 12px;
+      }
+      .mt5-conn-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--blue-bg);
+        border: 1px solid var(--blue-border);
+        border-radius: var(--radius);
+        padding: 10px 14px;
+        margin-bottom: 16px;
+        font-size: 12px;
+        color: var(--blue);
+      }
     </style>
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body>
+    <script>
+      // ── MT5-Only mode boot ─────────────────────────────────────────────────────────
+      (async function applyMT5Mode() {
+        let mt5Only = false;
+        try {
+          const cfg = await fetch("/api/config").then((r) => r.json());
+          mt5Only = !!cfg.mt5_only;
+          if (cfg.app_name) {
+            document
+              .querySelectorAll(".logo-text")
+              .forEach((el) => (el.textContent = cfg.app_name));
+          }
+        } catch (_) {}
 
-<script>
-// ── MT5-Only mode boot ─────────────────────────────────────────────────────────
-(async function applyMT5Mode() {
-  let mt5Only = false;
-  try {
-    const cfg = await fetch("/api/config").then(r => r.json());
-    mt5Only = !!cfg.mt5_only;
-    if (cfg.app_name) {
-      document.querySelectorAll(".logo-text").forEach(el => el.textContent = cfg.app_name);
-    }
-  } catch(_) {}
+        if (!mt5Only) return; // nothing to do — full dashboard mode
 
-  if (!mt5Only) return;   // nothing to do — full dashboard mode
+        // ── Hide Alpaca-specific nav items ─────────────────────────────────────────
+        const hideNavHrefs = ["#", "#positions", "#trades", "#feed", "#charts"];
+        document.querySelectorAll(".nav-item").forEach((el) => {
+          const href = el.getAttribute("href");
+          if (hideNavHrefs.includes(href)) el.style.display = "none";
+        });
 
-  // ── Hide Alpaca-specific nav items ─────────────────────────────────────────
-  const hideNavHrefs = ["#", "#positions", "#trades", "#feed", "#charts"];
-  document.querySelectorAll(".nav-item").forEach(el => {
-    const href = el.getAttribute("href");
-    if (hideNavHrefs.includes(href)) el.style.display = "none";
-  });
+        // ── Move MT5 nav item to top & mark active ─────────────────────────────────
+        const mt5NavItem = document.getElementById("nav-mt5");
+        if (mt5NavItem) {
+          const section = mt5NavItem.closest(".sidebar-section");
+          if (section)
+            section.insertBefore(
+              mt5NavItem,
+              section.querySelector(".nav-item"),
+            );
+          mt5NavItem.classList.add("active");
+        }
 
-  // ── Move MT5 nav item to top & mark active ─────────────────────────────────
-  const mt5NavItem = document.getElementById("nav-mt5");
-  if (mt5NavItem) {
-    const section = mt5NavItem.closest(".sidebar-section");
-    if (section) section.insertBefore(mt5NavItem, section.querySelector(".nav-item"));
-    mt5NavItem.classList.add("active");
-  }
+        // ── Update topbar subtitle ─────────────────────────────────────────────────
+        const topbarSub = document.querySelector(".topbar-sub");
+        if (topbarSub) topbarSub.textContent = "MetaTrader 5 · Live Bridge";
 
-  // ── Update topbar subtitle ─────────────────────────────────────────────────
-  const topbarSub = document.querySelector(".topbar-sub");
-  if (topbarSub) topbarSub.textContent = "MetaTrader 5 · Live Bridge";
+        // ── Hide strategy bar (Alpaca strategies) ─────────────────────────────────
+        const stratBar = document.getElementById("strategy-bar");
+        if (stratBar) stratBar.style.display = "none";
 
-  // ── Hide strategy bar (Alpaca strategies) ─────────────────────────────────
-  const stratBar = document.getElementById("strategy-bar");
-  if (stratBar) stratBar.style.display = "none";
+        // ── Hide all page sections except MT5 ─────────────────────────────────────
+        document.querySelectorAll("[id^='page-']").forEach((el) => {
+          el.style.display = el.id === "page-mt5" ? "block" : "none";
+        });
 
-  // ── Hide all page sections except MT5 ─────────────────────────────────────
-  document.querySelectorAll("[id^='page-']").forEach(el => {
-    el.style.display = el.id === "page-mt5" ? "block" : "none";
-  });
+        // ── Hide Alpaca stat cards + equity chart block (main content) ─────────────
+        const alpacaHide = [
+          ".stat-grid", // Portfolio Value / Cash / Positions / Week cards
+          ".equity-section", // Equity chart row
+          ".positions-section", // Positions table
+          ".trades-section", // Trade log table
+          ".decisions-section", // Signal feed
+          "#positions-table-wrap",
+          "#trades-table-wrap",
+          "#decisions-table-wrap",
+          ".content > .section", // Any generic section under .content
+        ];
+        alpacaHide.forEach((sel) => {
+          document
+            .querySelectorAll(sel)
+            .forEach((el) => (el.style.display = "none"));
+        });
 
-  // ── Hide Alpaca stat cards + equity chart block (main content) ─────────────
-  const alpacaHide = [
-    ".stat-grid",          // Portfolio Value / Cash / Positions / Week cards
-    ".equity-section",     // Equity chart row
-    ".positions-section",  // Positions table
-    ".trades-section",     // Trade log table
-    ".decisions-section",  // Signal feed
-    "#positions-table-wrap",
-    "#trades-table-wrap",
-    "#decisions-table-wrap",
-    ".content > .section",  // Any generic section under .content
-  ];
-  alpacaHide.forEach(sel => {
-    document.querySelectorAll(sel).forEach(el => el.style.display = "none");
-  });
+        // ── Topbar: hide Alpaca portfolio stats, show MT5 label ───────────────────
+        const topbarRight = document.querySelector(".topbar-right");
+        if (topbarRight) topbarRight.style.display = "none";
 
-  // ── Topbar: hide Alpaca portfolio stats, show MT5 label ───────────────────
-  const topbarRight = document.querySelector(".topbar-right");
-  if (topbarRight) topbarRight.style.display = "none";
+        // ── Update sidebar section label ──────────────────────────────────────────
+        const sectionLabel = document.querySelector(".sidebar-section-label");
+        if (sectionLabel) sectionLabel.textContent = "MT5";
 
-  // ── Update sidebar section label ──────────────────────────────────────────
-  const sectionLabel = document.querySelector(".sidebar-section-label");
-  if (sectionLabel) sectionLabel.textContent = "MT5";
-
-  // ── Auto-load MT5 data ─────────────────────────────────────────────────────
-  // loadMT5() is defined later in the page; wait for DOM ready then call it
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => { if (typeof loadMT5 === "function") loadMT5(); });
-  } else {
-    // Already loaded — defer one tick so loadMT5() is defined
-    setTimeout(() => { if (typeof loadMT5 === "function") loadMT5(); }, 50);
-  }
-})();
-</script>
+        // ── Auto-load MT5 data ─────────────────────────────────────────────────────
+        // loadMT5() is defined later in the page; wait for DOM ready then call it
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", () => {
+            if (typeof loadMT5 === "function") loadMT5();
+          });
+        } else {
+          // Already loaded — defer one tick so loadMT5() is defined
+          setTimeout(() => {
+            if (typeof loadMT5 === "function") loadMT5();
+          }, 50);
+        }
+      })();
+    </script>
 
     <div class="app">
       <!-- SIDEBAR -->
@@ -1378,21 +1515,38 @@
       </div>
       <!-- /LIVE CHARTS SECTION -->
 
-
       <!-- ── MT5 BRIDGE SECTION ──────────────────────────────────────── -->
-      <div id="page-mt5" style="display:none">
+      <div id="page-mt5" style="display: none">
         <div class="section-header">
           <div class="section-title">MT5 Bridge</div>
-          <div style="font-size:11px; color:var(--text-3)">Live feed from GalacticBridge.mq5</div>
+          <div style="font-size: 11px; color: var(--text-3)">
+            Live feed from GalacticBridge.mq5
+          </div>
         </div>
 
         <!-- Connection info banner -->
         <div class="mt5-conn-row">
-          ⚡ EA posts to <strong style="margin:0 4px">POST /api/mt5/trade</strong> — make sure
-          <code style="background:#dbeafe;padding:1px 5px;border-radius:3px">MT5_BRIDGE_KEY</code>
-          in <code style="background:#dbeafe;padding:1px 5px;border-radius:3px">.env</code> matches the EA's
-          <code style="background:#dbeafe;padding:1px 5px;border-radius:3px">API_KEY</code> input.
-          Add <code style="background:#dbeafe;padding:1px 5px;border-radius:3px">http://127.0.0.1:8080/api/mt5/trade</code>
+          ⚡ EA posts to
+          <strong style="margin: 0 4px">POST /api/mt5/trade</strong> — make sure
+          <code
+            style="background: #dbeafe; padding: 1px 5px; border-radius: 3px"
+            >MT5_BRIDGE_KEY</code
+          >
+          in
+          <code
+            style="background: #dbeafe; padding: 1px 5px; border-radius: 3px"
+            >.env</code
+          >
+          matches the EA's
+          <code
+            style="background: #dbeafe; padding: 1px 5px; border-radius: 3px"
+            >API_KEY</code
+          >
+          input. Add
+          <code
+            style="background: #dbeafe; padding: 1px 5px; border-radius: 3px"
+            >http://127.0.0.1:8080/api/mt5/trade</code
+          >
           to MT5 → Tools → Options → Expert Advisors → Allowed URLs.
         </div>
 
@@ -1405,7 +1559,7 @@
           </div>
           <div class="mt5-stat">
             <div class="label">Total P&amp;L</div>
-            <div class="val" id="mt5-pnl" style="font-size:20px">—</div>
+            <div class="val" id="mt5-pnl" style="font-size: 20px">—</div>
             <div class="sub">cumulative</div>
           </div>
           <div class="mt5-stat">
@@ -1415,12 +1569,12 @@
           </div>
           <div class="mt5-stat">
             <div class="label">Avg Win</div>
-            <div class="val" id="mt5-avgwin" style="color:var(--green)">—</div>
+            <div class="val" id="mt5-avgwin" style="color: var(--green)">—</div>
             <div class="sub">per trade</div>
           </div>
           <div class="mt5-stat">
             <div class="label">Avg Loss</div>
-            <div class="val" id="mt5-avgloss" style="color:var(--red)">—</div>
+            <div class="val" id="mt5-avgloss" style="color: var(--red)">—</div>
             <div class="sub">per trade</div>
           </div>
           <div class="mt5-stat">
@@ -1434,11 +1588,15 @@
         <div class="mt5-chart-row">
           <div class="mt5-chart-box">
             <div class="mt5-chart-title">Equity Curve</div>
-            <canvas id="mt5-equity-chart" class="mt5-chart-canvas"></canvas>
+            <div class="mt5-canvas-wrap">
+              <canvas id="mt5-equity-chart" class="mt5-chart-canvas"></canvas>
+            </div>
           </div>
           <div class="mt5-chart-box">
             <div class="mt5-chart-title">Daily P&amp;L</div>
-            <canvas id="mt5-daily-chart" class="mt5-chart-canvas"></canvas>
+            <div class="mt5-canvas-wrap">
+              <canvas id="mt5-daily-chart" class="mt5-chart-canvas"></canvas>
+            </div>
           </div>
         </div>
 
@@ -1446,10 +1604,23 @@
         <div class="mt5-table-wrap">
           <div class="mt5-table-header">
             <div class="title">Trade Log</div>
-            <button onclick="loadMT5()" style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer;color:var(--text-2);">↻ Refresh</button>
+            <button
+              onclick="loadMT5()"
+              style="
+                font-size: 11px;
+                padding: 4px 10px;
+                border-radius: 4px;
+                border: 1px solid var(--border);
+                background: var(--surface);
+                cursor: pointer;
+                color: var(--text-2);
+              "
+            >
+              ↻ Refresh
+            </button>
           </div>
-          <div style="overflow-x:auto">
-            <div class="mt5-table-scroll"><table class="mt5-table" id="mt5-trade-table">
+          <div class="mt5-table-scroll">
+            <table class="mt5-table" id="mt5-trade-table">
               <thead>
                 <tr>
                   <th>#</th>
@@ -1467,14 +1638,17 @@
                 </tr>
               </thead>
               <tbody id="mt5-table-body">
-                <tr><td colspan="12" class="mt5-empty">No trades yet — EA is listening...</td></tr>
+                <tr>
+                  <td colspan="12" class="mt5-empty">
+                    No trades yet — EA is listening...
+                  </td>
+                </tr>
               </tbody>
-            </table></div>
+            </table>
           </div>
         </div>
       </div>
       <!-- /MT5 BRIDGE SECTION -->
-
 
       <!-- /main -->
     </div>
@@ -2456,172 +2630,226 @@
             val.textContent = d.daily_loss_limit_pct.toFixed(0) + "%";
         })
         .catch(() => {});
-    
-// ══════════════════════════════════════════════════════════════════════════════
-// MT5 Bridge — charts & trade log
-// ══════════════════════════════════════════════════════════════════════════════
-let mt5EquityChart = null;
-let mt5DailyChart  = null;
 
-async function loadMT5() {
-  try {
-    const [statsRes, tradesRes] = await Promise.all([
-      fetch("/api/mt5/stats"),
-      fetch("/api/mt5/trades?limit=200"),
-    ]);
-    const stats  = await statsRes.json();
-    const trades = await tradesRes.json();
-    renderMT5Stats(stats);
-    renderMT5Charts(stats);
-    renderMT5Table(trades);
-  } catch (e) {
-    console.error("MT5 load error:", e);
-  }
-}
+      // ══════════════════════════════════════════════════════════════════════════════
+      // MT5 Bridge — charts & trade log
+      // ══════════════════════════════════════════════════════════════════════════════
+      let mt5EquityChart = null;
+      let mt5DailyChart = null;
 
-function renderMT5Stats(s) {
-  const set = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
-  const pnlEl = document.getElementById("mt5-pnl");
-  set("mt5-total",   s.total_closed ?? "—");
-  if (pnlEl) {
-    pnlEl.textContent = s.total_profit >= 0 ? `+$${s.total_profit.toFixed(2)}` : `-$${Math.abs(s.total_profit).toFixed(2)}`;
-    pnlEl.style.color = s.total_profit >= 0 ? "var(--green)" : "var(--red)";
-  }
-  set("mt5-winrate", s.total_closed ? `${s.win_rate}%` : "—");
-  set("mt5-winloss", `${s.win_count}W / ${s.loss_count}L`);
-  set("mt5-avgwin",  s.avg_win  ? `+$${s.avg_win.toFixed(2)}`  : "—");
-  set("mt5-avgloss", s.avg_loss ? `-$${Math.abs(s.avg_loss).toFixed(2)}` : "—");
-  set("mt5-rr",      s.risk_reward ? `${s.risk_reward}x` : "—");
-}
+      async function loadMT5() {
+        try {
+          const [statsRes, tradesRes] = await Promise.all([
+            fetch("/api/mt5/stats"),
+            fetch("/api/mt5/trades?limit=200"),
+          ]);
+          const stats = await statsRes.json();
+          const trades = await tradesRes.json();
+          renderMT5Stats(stats);
+          renderMT5Charts(stats);
+          renderMT5Table(trades);
+        } catch (e) {
+          console.error("MT5 load error:", e);
+        }
+      }
 
-function renderMT5Charts(s) {
-  // Equity curve — prepend $0 baseline, auto-scale Y
-  const eqCanvas = document.getElementById("mt5-equity-chart");
-  if (eqCanvas && s.equity_curve && s.equity_curve.length > 0) {
-    if (mt5EquityChart) mt5EquityChart.destroy();
-    const startLabel = s.equity_curve[0].time ? s.equity_curve[0].time.substring(0,10) : "Start";
-    const eqLabels = [startLabel, ...s.equity_curve.map(p => p.time ? p.time.substring(0,10) : "")];
-    const eqValues = [0, ...s.equity_curve.map(p => p.value)];
-    const eqMin = Math.min(...eqValues);
-    const eqMax = Math.max(...eqValues);
-    const eqPad = Math.max(Math.abs(eqMax - eqMin) * 0.2, 50);
-    mt5EquityChart = new Chart(eqCanvas, {
-      type: "line",
-      data: {
-        labels: eqLabels,
-        datasets: [{
-          label: "Equity",
-          data:  eqValues,
-          borderColor: "#2563eb",
-          backgroundColor: "rgba(37,99,235,0.08)",
-          borderWidth: 2,
-          pointRadius: 3,
-          fill: true,
-          tension: 0.3,
-        }],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { ticks: { maxTicksLimit: 6, font:{size:10} }, grid:{display:false} },
-          y: {
-            min: eqMin - eqPad,
-            max: eqMax + eqPad,
-            ticks: { font:{size:10}, callback: v => `$${v.toFixed(0)}` },
-            grid: { color:"#f3f4f6" }
-          },
-        },
-      },
-    });
-  }
+      function renderMT5Stats(s) {
+        const set = (id, val) => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = val;
+        };
+        const pnlEl = document.getElementById("mt5-pnl");
+        set("mt5-total", s.total_closed ?? "—");
+        if (pnlEl) {
+          pnlEl.textContent =
+            s.total_profit >= 0
+              ? `+$${s.total_profit.toFixed(2)}`
+              : `-$${Math.abs(s.total_profit).toFixed(2)}`;
+          pnlEl.style.color =
+            s.total_profit >= 0 ? "var(--green)" : "var(--red)";
+        }
+        set("mt5-winrate", s.total_closed ? `${s.win_rate}%` : "—");
+        set("mt5-winloss", `${s.win_count}W / ${s.loss_count}L`);
+        set("mt5-avgwin", s.avg_win ? `+$${s.avg_win.toFixed(2)}` : "—");
+        set(
+          "mt5-avgloss",
+          s.avg_loss ? `-$${Math.abs(s.avg_loss).toFixed(2)}` : "—",
+        );
+        set("mt5-rr", s.risk_reward ? `${s.risk_reward}x` : "—");
+      }
 
-  // Daily PnL bar chart — auto-scale Y with padding
-  const dCanvas = document.getElementById("mt5-daily-chart");
-  if (dCanvas && s.daily_pnl && s.daily_pnl.length > 0) {
-    if (mt5DailyChart) mt5DailyChart.destroy();
-    const pnlVals = s.daily_pnl.map(p => p.pnl);
-    const pnlMin = Math.min(...pnlVals);
-    const pnlMax = Math.max(...pnlVals);
-    const pnlPad = Math.max(Math.abs(pnlMax - pnlMin) * 0.25, 20);
-    mt5DailyChart = new Chart(dCanvas, {
-      type: "bar",
-      data: {
-        labels: s.daily_pnl.map(p => p.day),
-        datasets: [{
-          label: "Daily P&L",
-          data:  pnlVals,
-          backgroundColor: pnlVals.map(v => v >= 0 ? "rgba(22,163,74,0.7)" : "rgba(220,38,38,0.7)"),
-          borderRadius: 4,
-        }],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { ticks: { maxTicksLimit: 8, font:{size:10} }, grid:{display:false} },
-          y: {
-            min: pnlMin - pnlPad,
-            max: pnlMax + pnlPad,
-            ticks: { font:{size:10}, callback: v => `$${v.toFixed(0)}` },
-            grid: { color:"#f3f4f6" }
-          },
-        },
-      },
-    });
-  }
-}
+      function renderMT5Charts(s) {
+        // Equity curve — prepend $0 baseline, auto-scale Y
+        const eqCanvas = document.getElementById("mt5-equity-chart");
+        if (eqCanvas && s.equity_curve && s.equity_curve.length > 0) {
+          if (mt5EquityChart) mt5EquityChart.destroy();
+          const eqLabels = [
+            "Start",
+            ...s.equity_curve.map((p) =>
+              p.time ? p.time.substring(0, 10) : "",
+            ),
+          ];
+          const eqValues = [0, ...s.equity_curve.map((p) => p.value)];
+          const eqMin = Math.min(0, ...eqValues);
+          const eqMax = Math.max(0, ...eqValues);
+          const eqRange = eqMax - eqMin || 1;
+          const eqPad = Math.max(eqRange * 0.1, 10);
+          mt5EquityChart = new Chart(eqCanvas, {
+            type: "line",
+            data: {
+              labels: eqLabels,
+              datasets: [
+                {
+                  label: "Equity",
+                  data: eqValues,
+                  borderColor: "#2563eb",
+                  backgroundColor: "rgba(37,99,235,0.08)",
+                  borderWidth: 2,
+                  pointRadius: 3,
+                  fill: true,
+                  tension: 0.3,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: {
+                  ticks: { maxTicksLimit: 6, font: { size: 10 } },
+                  grid: { display: false },
+                },
+                y: {
+                  min: eqMin - eqPad,
+                  max: eqMax + eqPad,
+                  ticks: {
+                    font: { size: 10 },
+                    callback: (v) => `$${v.toFixed(0)}`,
+                  },
+                  grid: { color: "#f3f4f6" },
+                },
+              },
+            },
+          });
+        }
 
-function renderMT5Table(trades) {
-  const tbody = document.getElementById("mt5-table-body");
-  if (!tbody) return;
-  if (!trades || trades.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="12" class="mt5-empty">No trades yet — EA is listening...</td></tr>';
-    return;
-  }
-  tbody.innerHTML = trades.map(t => {
-    const pnl     = parseFloat(t.profit || 0);
-    const pnlStr  = pnl !== 0 ? (pnl > 0 ? `<span class="mt5-profit-pos">+$${pnl.toFixed(2)}</span>`
-                                          : `<span class="mt5-profit-neg">-$${Math.abs(pnl).toFixed(2)}</span>`) : "—";
-    const time    = (t.received_at || "").substring(0, 19).replace("T", " ");
-    const evBadge = t.event === "open"  ? `<span class="mt5-badge-open">OPEN</span>`
-                                        : `<span class="mt5-badge-close">CLOSE</span>`;
-    const sideBadge = t.side === "buy"  ? `<span class="mt5-badge-buy">BUY</span>`
-                                        : `<span class="mt5-badge-sell">SELL</span>`;
-    return `<tr>
+        // Daily PnL bar chart — auto-scale Y, always include 0 baseline
+        const dCanvas = document.getElementById("mt5-daily-chart");
+        if (dCanvas && s.daily_pnl && s.daily_pnl.length > 0) {
+          if (mt5DailyChart) mt5DailyChart.destroy();
+          const pnlVals = s.daily_pnl.map((p) => p.pnl);
+          const pnlMin = Math.min(0, ...pnlVals);
+          const pnlMax = Math.max(0, ...pnlVals);
+          const pnlRange = pnlMax - pnlMin || 1;
+          const pnlPad = Math.max(pnlRange * 0.15, 10);
+          mt5DailyChart = new Chart(dCanvas, {
+            type: "bar",
+            data: {
+              labels: s.daily_pnl.map((p) => p.day),
+              datasets: [
+                {
+                  label: "Daily P&L",
+                  data: pnlVals,
+                  backgroundColor: pnlVals.map((v) =>
+                    v >= 0 ? "rgba(22,163,74,0.7)" : "rgba(220,38,38,0.7)",
+                  ),
+                  borderRadius: 4,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: {
+                  ticks: { maxTicksLimit: 8, font: { size: 10 } },
+                  grid: { display: false },
+                },
+                y: {
+                  min: pnlMin - pnlPad,
+                  max: pnlMax + pnlPad,
+                  ticks: {
+                    font: { size: 10 },
+                    callback: (v) => `$${v.toFixed(0)}`,
+                  },
+                  grid: { color: "#f3f4f6" },
+                },
+              },
+            },
+          });
+        }
+      }
+
+      function renderMT5Table(trades) {
+        const tbody = document.getElementById("mt5-table-body");
+        if (!tbody) return;
+        if (!trades || trades.length === 0) {
+          tbody.innerHTML =
+            '<tr><td colspan="12" class="mt5-empty">No trades yet — EA is listening...</td></tr>';
+          return;
+        }
+        tbody.innerHTML = trades
+          .map((t) => {
+            const pnl = parseFloat(t.profit || 0);
+            const pnlStr =
+              pnl !== 0
+                ? pnl > 0
+                  ? `<span class="mt5-profit-pos">+$${pnl.toFixed(2)}</span>`
+                  : `<span class="mt5-profit-neg">-$${Math.abs(pnl).toFixed(2)}</span>`
+                : "—";
+            const rawTime =
+              t.event === "open" ? t.open_time || "" : t.close_time || "";
+            const time = rawTime
+              ? rawTime.substring(0, 19).replace("T", " ")
+              : (t.received_at || "").substring(0, 19).replace("T", " ");
+            const evBadge =
+              t.event === "open"
+                ? `<span class="mt5-badge-open">OPEN</span>`
+                : `<span class="mt5-badge-close">CLOSE</span>`;
+            const sideBadge =
+              t.side === "buy"
+                ? `<span class="mt5-badge-buy">BUY</span>`
+                : `<span class="mt5-badge-sell">SELL</span>`;
+            return `<tr>
       <td>${t.ticket}</td>
       <td>${time}</td>
       <td><strong>${t.symbol}</strong></td>
       <td>${evBadge}</td>
       <td>${sideBadge}</td>
-      <td>${parseFloat(t.lots||0).toFixed(2)}</td>
-      <td>${t.open_price  > 0 ? parseFloat(t.open_price).toFixed(5)  : "—"}</td>
+      <td>${parseFloat(t.lots || 0).toFixed(2)}</td>
+      <td>${t.open_price > 0 ? parseFloat(t.open_price).toFixed(5) : "—"}</td>
       <td>${t.close_price > 0 ? parseFloat(t.close_price).toFixed(5) : "—"}</td>
       <td>${t.sl > 0 ? parseFloat(t.sl).toFixed(5) : "—"}</td>
       <td>${t.tp > 0 ? parseFloat(t.tp).toFixed(5) : "—"}</td>
       <td>${pnlStr}</td>
       <td>${t.strategy || "—"}</td>
     </tr>`;
-  }).join("");
-}
+          })
+          .join("");
+      }
 
-// Hook into existing nav routing
-(function patchMT5Nav() {
-  const link = document.getElementById("nav-mt5");
-  if (!link) return;
-  link.addEventListener("click", function(e) {
-    e.preventDefault();
-    // Hide all pages (reuse existing show/hide pattern)
-    document.querySelectorAll("[id^='page-']").forEach(el => el.style.display = "none");
-    const mt5Page = document.getElementById("page-mt5");
-    if (mt5Page) mt5Page.style.display = "block";
-    // Update active nav
-    document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
-    link.classList.add("active");
-    loadMT5();
-  });
-})();
-
-  </script>
+      // Hook into existing nav routing
+      (function patchMT5Nav() {
+        const link = document.getElementById("nav-mt5");
+        if (!link) return;
+        link.addEventListener("click", function (e) {
+          e.preventDefault();
+          // Hide all pages (reuse existing show/hide pattern)
+          document
+            .querySelectorAll("[id^='page-']")
+            .forEach((el) => (el.style.display = "none"));
+          const mt5Page = document.getElementById("page-mt5");
+          if (mt5Page) mt5Page.style.display = "block";
+          // Update active nav
+          document
+            .querySelectorAll(".nav-item")
+            .forEach((n) => n.classList.remove("active"));
+          link.classList.add("active");
+          loadMT5();
+        });
+      })();
+    </script>
   </body>
 </html>

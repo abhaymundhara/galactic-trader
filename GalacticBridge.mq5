@@ -120,9 +120,17 @@ void OnTick() {
         }
     }
 
-    // Check for closed positions via history
+    // ── Check for closed positions via history ─────────────────────────────
+    // Pass 1: scan the 60-second window and collect deals that need pushing.
+    // We must NOT call HistorySelectByPosition inside this loop because it
+    // overwrites the current time-based selection and corrupts HistoryDealsTotal().
+    struct ClosePending { ulong deal_ticket; ulong pos_ticket; };
+    ClosePending pending[];
+    ArrayResize(pending, 0);
+
     HistorySelect(TimeCurrent() - 60, TimeCurrent());
-    for (int i = 0; i < HistoryDealsTotal(); i++) {
+    int hist_total = HistoryDealsTotal();
+    for (int i = 0; i < hist_total; i++) {
         ulong deal = HistoryDealGetTicket(i);
         if (HistoryDealGetInteger(deal, DEAL_ENTRY) != DEAL_ENTRY_OUT) continue;
 
@@ -135,7 +143,7 @@ void OnTick() {
         }
         if (already_pushed) continue;
 
-        // Mark closed in snaps
+        // Mark closed in snaps immediately so a second OnTick won't re-queue it
         bool snap_updated = false;
         for (int j = 0; j < ArraySize(snaps); j++) {
             if (snaps[j].ticket == pos_ticket) {
@@ -152,18 +160,49 @@ void OnTick() {
             snaps[idx].state  = "closed";
         }
 
+        ArrayResize(pending, ArraySize(pending)+1);
+        pending[ArraySize(pending)-1].deal_ticket = deal;
+        pending[ArraySize(pending)-1].pos_ticket  = pos_ticket;
+    }
+
+    // Pass 2: for each collected close, use HistorySelectByPosition to retrieve
+    // the opening deal so we get the correct side and open_price.
+    for (int i = 0; i < ArraySize(pending); i++) {
+        ulong deal       = pending[i].deal_ticket;
+        ulong pos_ticket = pending[i].pos_ticket;
+
+        double   open_price  = 0.0,  close_price = 0.0, profit = 0.0, volume = 0.0;
+        string   symbol      = "",   comment     = "",   side   = "buy";
+        datetime open_time   = 0,    close_time  = 0;
+
+        if (HistorySelectByPosition(pos_ticket)) {
+            int n = HistoryDealsTotal();
+            for (int k = 0; k < n; k++) {
+                ulong d = HistoryDealGetTicket(k);
+                long  entry = HistoryDealGetInteger(d, DEAL_ENTRY);
+                if (entry == DEAL_ENTRY_IN) {
+                    // Opening deal → real open price and position direction
+                    open_price = HistoryDealGetDouble(d, DEAL_PRICE);
+                    open_time  = (datetime)HistoryDealGetInteger(d, DEAL_TIME);
+                    // DEAL_TYPE_BUY on the opening deal means a BUY position
+                    side = (HistoryDealGetInteger(d, DEAL_TYPE) == DEAL_TYPE_BUY) ? "buy" : "sell";
+                } else if (entry == DEAL_ENTRY_OUT && d == deal) {
+                    // Closing deal — grab all remaining fields
+                    close_price = HistoryDealGetDouble(d, DEAL_PRICE);
+                    profit      = HistoryDealGetDouble(d, DEAL_PROFIT);
+                    volume      = HistoryDealGetDouble(d, DEAL_VOLUME);
+                    symbol      = HistoryDealGetString(d, DEAL_SYMBOL);
+                    comment     = HistoryDealGetString(d, DEAL_COMMENT);
+                    close_time  = (datetime)HistoryDealGetInteger(d, DEAL_TIME);
+                }
+            }
+        }
+
         PushTrade("close",
-            pos_ticket,
-            HistoryDealGetString(deal, DEAL_SYMBOL),
-            (HistoryDealGetInteger(deal, DEAL_TYPE) == DEAL_TYPE_SELL) ? "sell" : "buy",
-            HistoryDealGetDouble(deal, DEAL_VOLUME),
-            0.0,
-            HistoryDealGetDouble(deal, DEAL_PRICE),
-            0.0, 0.0,
-            HistoryDealGetDouble(deal, DEAL_PROFIT),
-            HistoryDealGetString(deal, DEAL_COMMENT),
-            0,
-            (datetime)HistoryDealGetInteger(deal, DEAL_TIME)
+            pos_ticket, symbol, side,
+            volume, open_price, close_price,
+            0.0, 0.0,   // SL/TP not stored on deals; captured in the open event
+            profit, comment, open_time, close_time
         );
     }
 }
