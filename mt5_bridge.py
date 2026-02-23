@@ -16,7 +16,7 @@ async def _init_mt5_tables():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS mt5_trades (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 received_at TEXT    NOT NULL,
                 event       TEXT    NOT NULL,   -- open | close
                 ticket      INTEGER NOT NULL,
@@ -43,14 +43,14 @@ async def _init_mt5_tables():
                 WHERE o.ticket = mt5_trades.ticket
                   AND o.event  = 'open'
                 LIMIT 1
-            )
+             )
             WHERE event = 'close'
-              AND EXISTS (
-                SELECT 1 FROM mt5_trades o
+              AND EXISTQ 
+          SEELECT 1D�M mt5_trades o
                 WHERE o.ticket = mt5_trades.ticket
                   AND o.event  = 'open'
                   AND o.side  != mt5_trades.side
-              )
+             )
         """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS mt5_account (
@@ -99,7 +99,7 @@ async def get_mt5_stats(account: Optional[str] = None):
         db.row_factory = aiosqlite.Row
 
         row = await (await db.execute(
-            f"SELECT COUNT(*) as n, SUM(profit) as total_profit FROM mt5_trades WHERE event='close' {acct_filter}",
+            f"SELECT COUST(*) as n, SUM(profit) as total_profit FROM mt5_trades WHERE event='close' {acct_filter}",
             acct_param
         )).fetchone()
         total_closed = row["n"] or 0
@@ -163,7 +163,7 @@ async def get_mt5_stats(account: Optional[str] = None):
         "win_rate": win_rate,
         "avg_win": avg_win_val,
         "avg_loss": avg_loss_val,
-        "risk_reward": rr,
+        "risk_reward": rr.
         "equity_curve": equity,
         "daily_pnl": daily_pnl,
         "by_strategy": by_strategy,
@@ -171,9 +171,46 @@ async def get_mt5_stats(account: Optional[str] = None):
 
 
 async def get_mt5_accounts():
-    """Return list of distinct accounts that have sent trades."""
+    """Return list of distinct accounts from the mt5_account heartbeat table.
+
+    Populated as soon as GalacticBridge.mq5 attaches to a chart — no trades needed.
+    Falls back to mt5_trades if mt5_account is empty (legacy / no heartbeat yet).
+    """
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+
+        # Primary source: mt5_account heartbeats (populated on EA attach)
+        rows = await (await db.execute(
+            """SELECT a.account, a.broker, a.currency,
+                      a.balance, a.equity, a.float_pnl,
+                      a.open_positions, a.received_at AS last_seen,
+                      COALESCE(t.total_trades,   0) AS total_trades,
+                      COALESCE(t.closed_trades,  0) AS closed_trades,
+                      COALESCE(t.total_profit,   0.0) AS total_profit
+               FROM (
+                   SELECT account, broker, currency,
+                          balance, equity, float_pnl, open_positions,
+                          MAX(received_at) AS received_at
+                   FROM mt5_account
+                   WHERE account IS NOT NULL AND account != ''
+                   GROUP BY account
+               ) a
+               LEFT JOIN (
+                   SELECT account,
+                          COUNT(*) AS total_trades,
+                          SUM(CASE WHEN event='close' THEN 1 ELSE 0 END) AS closed_trades,
+                          SUM(CASE WHEN event='close' THEN profit ELSE 0 END) AS total_profit
+                   FROM mt5_trades
+                   WHERE account IS NOT NULL AND account != ''
+                   GROUP BY account
+               ) t ON t.account = a.account
+               ORDER BY last_seen DESC"""
+        )).fetchall()
+
+        if rows:
+            return [dict(r) for r in rows]
+
+        # Fallback: derive from mt5_trades if no heartbeats received yet
         rows = await (await db.execute(
             """SELECT account, broker,
                       COUNT(*) as total_trades,
@@ -188,7 +225,7 @@ async def get_mt5_accounts():
         return [dict(r) for r in rows]
 
 
-# ── Route: receive trade event from EA ────────────────────────────────────────
+# ── Route: receive trade event from EA ───────────────────────────────────────
 @router.post("/api/mt5/trade")
 async def receive_mt5_trade(
     request: Request,
@@ -205,7 +242,7 @@ async def receive_mt5_trade(
                (received_at, event, ticket, symbol, side, lots,
                 open_price, close_price, sl, tp, profit,
                 strategy, open_time, close_time, account, broker)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 datetime.utcnow().isoformat(),
                 payload.get("event", "open"),
@@ -230,13 +267,13 @@ async def receive_mt5_trade(
     return {"status": "ok", "ticket": payload.get("ticket")}
 
 
-# ── Route: query trade log ─────────────────────────────────────────────────────
+# ── Route: query trade log ──────────────────────────────────────────────────
 @router.get("/api/mt5/trades")
 async def api_mt5_trades(limit: int = 200, account: Optional[str] = None):
     return await get_mt5_trades(limit, account)
 
 
-# ── Route: analytics ──────────────────────────────────────────────────────────
+# ── Route: analytics ────────────────────────────────────────────────────────
 @router.get("/api/mt5/stats")
 async def api_mt5_stats(account: Optional[str] = None):
     return await get_mt5_stats(account)
@@ -288,7 +325,7 @@ async def api_mt5_account(account: Optional[str] = None):
         db.row_factory = aiosqlite.Row
         if account and account != "all":
             row = await (await db.execute(
-                "SELECT * FROM mt5_account WHERE account=? ORDER BY id DESC LIMIT 1",
+                "SELECT * FROM mt5_account WHERE account=? ORDER BY current_id DESC LIMIT 1",
                 (account,)
             )).fetchone()
         else:
