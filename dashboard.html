@@ -902,6 +902,84 @@
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body>
+
+<script>
+// ── MT5-Only mode boot ─────────────────────────────────────────────────────────
+(async function applyMT5Mode() {
+  let mt5Only = false;
+  try {
+    const cfg = await fetch("/api/config").then(r => r.json());
+    mt5Only = !!cfg.mt5_only;
+    if (cfg.app_name) {
+      document.querySelectorAll(".logo-text").forEach(el => el.textContent = cfg.app_name);
+    }
+  } catch(_) {}
+
+  if (!mt5Only) return;   // nothing to do — full dashboard mode
+
+  // ── Hide Alpaca-specific nav items ─────────────────────────────────────────
+  const hideNavHrefs = ["#", "#positions", "#trades", "#feed", "#charts"];
+  document.querySelectorAll(".nav-item").forEach(el => {
+    const href = el.getAttribute("href");
+    if (hideNavHrefs.includes(href)) el.style.display = "none";
+  });
+
+  // ── Move MT5 nav item to top & mark active ─────────────────────────────────
+  const mt5NavItem = document.getElementById("nav-mt5");
+  if (mt5NavItem) {
+    const section = mt5NavItem.closest(".sidebar-section");
+    if (section) section.insertBefore(mt5NavItem, section.querySelector(".nav-item"));
+    mt5NavItem.classList.add("active");
+  }
+
+  // ── Update topbar subtitle ─────────────────────────────────────────────────
+  const topbarSub = document.querySelector(".topbar-sub");
+  if (topbarSub) topbarSub.textContent = "MetaTrader 5 · Live Bridge";
+
+  // ── Hide strategy bar (Alpaca strategies) ─────────────────────────────────
+  const stratBar = document.getElementById("strategy-bar");
+  if (stratBar) stratBar.style.display = "none";
+
+  // ── Hide all page sections except MT5 ─────────────────────────────────────
+  document.querySelectorAll("[id^='page-']").forEach(el => {
+    el.style.display = el.id === "page-mt5" ? "block" : "none";
+  });
+
+  // ── Hide Alpaca stat cards + equity chart block (main content) ─────────────
+  const alpacaHide = [
+    ".stat-grid",          // Portfolio Value / Cash / Positions / Week cards
+    ".equity-section",     // Equity chart row
+    ".positions-section",  // Positions table
+    ".trades-section",     // Trade log table
+    ".decisions-section",  // Signal feed
+    "#positions-table-wrap",
+    "#trades-table-wrap",
+    "#decisions-table-wrap",
+    ".content > .section",  // Any generic section under .content
+  ];
+  alpacaHide.forEach(sel => {
+    document.querySelectorAll(sel).forEach(el => el.style.display = "none");
+  });
+
+  // ── Topbar: hide Alpaca portfolio stats, show MT5 label ───────────────────
+  const topbarRight = document.querySelector(".topbar-right");
+  if (topbarRight) topbarRight.style.display = "none";
+
+  // ── Update sidebar section label ──────────────────────────────────────────
+  const sectionLabel = document.querySelector(".sidebar-section-label");
+  if (sectionLabel) sectionLabel.textContent = "MT5";
+
+  // ── Auto-load MT5 data ─────────────────────────────────────────────────────
+  // loadMT5() is defined later in the page; wait for DOM ready then call it
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => { if (typeof loadMT5 === "function") loadMT5(); });
+  } else {
+    // Already loaded — defer one tick so loadMT5() is defined
+    setTimeout(() => { if (typeof loadMT5 === "function") loadMT5(); }, 50);
+  }
+})();
+</script>
+
     <div class="app">
       <!-- SIDEBAR -->
       <nav class="sidebar">
