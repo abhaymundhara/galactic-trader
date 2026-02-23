@@ -36,9 +36,6 @@ async def _init_mt5_tables():
             )
         """)
         # ── Migration: fix pre-EA-fix close records that had inverted sides ──
-        # Old EA code used the CLOSING deal type (which is opposite the position
-        # direction) to set side.  Cross-reference close events against their
-        # matching open event by ticket to recover the correct side.
         await db.execute("""
             UPDATE mt5_trades
             SET side = (
@@ -74,73 +71,86 @@ async def _init_mt5_tables():
         await db.commit()
 
 
-async def get_mt5_trades(limit: int = 200):
+async def get_mt5_trades(limit: int = 200, account: Optional[str] = None):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        rows = await (
-            await db.execute(
-                "SELECT * FROM mt5_trades ORDER BY id DESC LIMIT ?", (limit,)
-            )
-        ).fetchall()
+        if account and account != "all":
+            rows = await (
+                await db.execute(
+                    "SELECT * FROM mt5_trades WHERE account=? ORDER BY id DESC LIMIT ?",
+                    (account, limit),
+                )
+            ).fetchall()
+        else:
+            rows = await (
+                await db.execute(
+                    "SELECT * FROM mt5_trades ORDER BY id DESC LIMIT ?", (limit,)
+                )
+            ).fetchall()
         return [dict(r) for r in rows]
 
 
-async def get_mt5_stats():
-    """Aggregate analytics for the MT5 tab."""
+async def get_mt5_stats(account: Optional[str] = None):
+    """Aggregate analytics for the MT5 tab, optionally filtered by account."""
+    acct_filter = "AND account=?" if (account and account != "all") else ""
+    acct_param  = (account,) if (account and account != "all") else ()
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
 
-        # Total closed trades
         row = await (await db.execute(
-            "SELECT COUNT(*) as n, SUM(profit) as total_profit FROM mt5_trades WHERE event='close'"
+            f"SELECT COUNT(*) as n, SUM(profit) as total_profit FROM mt5_trades WHERE event='close' {acct_filter}",
+            acct_param
         )).fetchone()
         total_closed = row["n"] or 0
         total_profit = row["total_profit"] or 0.0
 
-        # Win / Loss
         wins = await (await db.execute(
-            "SELECT COUNT(*) as n FROM mt5_trades WHERE event='close' AND profit > 0"
+            f"SELECT COUNT(*) as n FROM mt5_trades WHERE event='close' AND profit > 0 {acct_filter}",
+            acct_param
         )).fetchone()
         losses = await (await db.execute(
-            "SELECT COUNT(*) as n FROM mt5_trades WHERE event='close' AND profit <= 0"
+            f"SELECT COUNT(*) as n FROM mt5_trades WHERE event='close' AND profit <= 0 {acct_filter}",
+            acct_param
         )).fetchone()
         win_count  = wins["n"]  or 0
         loss_count = losses["n"] or 0
         win_rate   = round(win_count / total_closed * 100, 1) if total_closed else 0.0
 
-        # Avg win / avg loss
         avg_win = await (await db.execute(
-            "SELECT AVG(profit) as v FROM mt5_trades WHERE event='close' AND profit > 0"
+            f"SELECT AVG(profit) as v FROM mt5_trades WHERE event='close' AND profit > 0 {acct_filter}",
+            acct_param
         )).fetchone()
         avg_loss = await (await db.execute(
-            "SELECT AVG(profit) as v FROM mt5_trades WHERE event='close' AND profit <= 0"
+            f"SELECT AVG(profit) as v FROM mt5_trades WHERE event='close' AND profit <= 0 {acct_filter}",
+            acct_param
         )).fetchone()
         avg_win_val  = round(avg_win["v"]  or 0.0, 2)
         avg_loss_val = round(avg_loss["v"] or 0.0, 2)
         rr = round(abs(avg_win_val / avg_loss_val), 2) if avg_loss_val != 0 else 0.0
 
-        # Equity curve: cumulative profit over time (closed trades)
         curve_rows = await (await db.execute(
-            "SELECT close_time, profit FROM mt5_trades WHERE event='close' ORDER BY id ASC"
+            f"SELECT close_time, profit FROM mt5_trades WHERE event='close' {acct_filter} ORDER BY id ASC",
+            acct_param
         )).fetchall()
         equity, cumulative = [], 0.0
         for r in curve_rows:
             cumulative += r["profit"]
             equity.append({"time": r["close_time"], "value": round(cumulative, 2)})
 
-        # Daily PnL
         daily_rows = await (await db.execute(
-            """SELECT substr(close_time,1,10) as day, SUM(profit) as pnl
-               FROM mt5_trades WHERE event='close'
-               GROUP BY day ORDER BY day ASC"""
+            f"""SELECT substr(close_time,1,10) as day, SUM(profit) as pnl
+               FROM mt5_trades WHERE event='close' {acct_filter}
+               GROUP BY day ORDER BY day ASC""",
+            acct_param
         )).fetchall()
         daily_pnl = [{"day": r["day"], "pnl": round(r["pnl"], 2)} for r in daily_rows]
 
-        # By strategy
         strat_rows = await (await db.execute(
-            """SELECT strategy, COUNT(*) as trades, SUM(profit) as profit
-               FROM mt5_trades WHERE event='close'
-               GROUP BY strategy"""
+            f"""SELECT strategy, COUNT(*) as trades, SUM(profit) as profit
+               FROM mt5_trades WHERE event='close' {acct_filter}
+               GROUP BY strategy""",
+            acct_param
         )).fetchall()
         by_strategy = [{"strategy": r["strategy"], "trades": r["trades"],
                         "profit": round(r["profit"] or 0, 2)} for r in strat_rows]
@@ -158,6 +168,24 @@ async def get_mt5_stats():
         "daily_pnl": daily_pnl,
         "by_strategy": by_strategy,
     }
+
+
+async def get_mt5_accounts():
+    """Return list of distinct accounts that have sent trades."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            """SELECT account, broker,
+                      COUNT(*) as total_trades,
+                      SUM(CASE WHEN event='close' THEN 1 ELSE 0 END) as closed_trades,
+                      SUM(CASE WHEN event='close' THEN profit ELSE 0 END) as total_profit,
+                      MAX(received_at) as last_seen
+               FROM mt5_trades
+               WHERE account IS NOT NULL AND account != ''
+               GROUP BY account
+               ORDER BY last_seen DESC"""
+        )).fetchall()
+        return [dict(r) for r in rows]
 
 
 # ── Route: receive trade event from EA ────────────────────────────────────────
@@ -204,14 +232,20 @@ async def receive_mt5_trade(
 
 # ── Route: query trade log ─────────────────────────────────────────────────────
 @router.get("/api/mt5/trades")
-async def api_mt5_trades(limit: int = 200):
-    return await get_mt5_trades(limit)
+async def api_mt5_trades(limit: int = 200, account: Optional[str] = None):
+    return await get_mt5_trades(limit, account)
 
 
 # ── Route: analytics ──────────────────────────────────────────────────────────
 @router.get("/api/mt5/stats")
-async def api_mt5_stats():
-    return await get_mt5_stats()
+async def api_mt5_stats(account: Optional[str] = None):
+    return await get_mt5_stats(account)
+
+
+# ── Route: list distinct accounts ────────────────────────────────────────────
+@router.get("/api/mt5/accounts")
+async def api_mt5_accounts():
+    return await get_mt5_accounts()
 
 
 # ── Route: receive live account snapshot from EA ──────────────────────────────
@@ -249,10 +283,16 @@ async def receive_mt5_account(
 
 # ── Route: get latest account snapshot ───────────────────────────────────────
 @router.get("/api/mt5/account")
-async def api_mt5_account():
+async def api_mt5_account(account: Optional[str] = None):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        row = await (await db.execute(
-            "SELECT * FROM mt5_account ORDER BY id DESC LIMIT 1"
-        )).fetchone()
+        if account and account != "all":
+            row = await (await db.execute(
+                "SELECT * FROM mt5_account WHERE account=? ORDER BY id DESC LIMIT 1",
+                (account,)
+            )).fetchone()
+        else:
+            row = await (await db.execute(
+                "SELECT * FROM mt5_account ORDER BY id DESC LIMIT 1"
+            )).fetchone()
         return dict(row) if row else {}
