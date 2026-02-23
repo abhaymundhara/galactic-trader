@@ -881,8 +881,9 @@
       .mt5-chart-row   { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px; }
       .mt5-chart-box   { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
       .mt5-chart-title { font-size:12px; font-weight:600; color:var(--text-3); margin-bottom:10px; }
-      .mt5-chart-canvas{ width:100%; height:160px; }
+      .mt5-chart-canvas{ width:100%; height:220px; }
       .mt5-table-wrap  { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+      .mt5-table-scroll { overflow-x:auto; width:100%; }
       .mt5-table-header{ padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
       .mt5-table-header .title { font-size:13px; font-weight:600; }
       .mt5-table        { width:100%; border-collapse:collapse; font-size:12px; }
@@ -1448,7 +1449,7 @@
             <button onclick="loadMT5()" style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer;color:var(--text-2);">↻ Refresh</button>
           </div>
           <div style="overflow-x:auto">
-            <table class="mt5-table" id="mt5-trade-table">
+            <div class="mt5-table-scroll"><table class="mt5-table" id="mt5-trade-table">
               <thead>
                 <tr>
                   <th>#</th>
@@ -1468,7 +1469,7 @@
               <tbody id="mt5-table-body">
                 <tr><td colspan="12" class="mt5-empty">No trades yet — EA is listening...</td></tr>
               </tbody>
-            </table>
+            </table></div>
           </div>
         </div>
       </div>
@@ -2494,21 +2495,27 @@ function renderMT5Stats(s) {
 }
 
 function renderMT5Charts(s) {
-  // Equity curve
+  // Equity curve — prepend $0 baseline, auto-scale Y
   const eqCanvas = document.getElementById("mt5-equity-chart");
   if (eqCanvas && s.equity_curve && s.equity_curve.length > 0) {
     if (mt5EquityChart) mt5EquityChart.destroy();
+    const startLabel = s.equity_curve[0].time ? s.equity_curve[0].time.substring(0,10) : "Start";
+    const eqLabels = [startLabel, ...s.equity_curve.map(p => p.time ? p.time.substring(0,10) : "")];
+    const eqValues = [0, ...s.equity_curve.map(p => p.value)];
+    const eqMin = Math.min(...eqValues);
+    const eqMax = Math.max(...eqValues);
+    const eqPad = Math.max(Math.abs(eqMax - eqMin) * 0.2, 50);
     mt5EquityChart = new Chart(eqCanvas, {
       type: "line",
       data: {
-        labels: s.equity_curve.map(p => p.time ? p.time.substring(0,10) : ""),
+        labels: eqLabels,
         datasets: [{
           label: "Equity",
-          data:  s.equity_curve.map(p => p.value),
+          data:  eqValues,
           borderColor: "#2563eb",
           backgroundColor: "rgba(37,99,235,0.08)",
           borderWidth: 2,
-          pointRadius: 0,
+          pointRadius: 3,
           fill: true,
           tension: 0.3,
         }],
@@ -2518,24 +2525,33 @@ function renderMT5Charts(s) {
         plugins: { legend: { display: false } },
         scales: {
           x: { ticks: { maxTicksLimit: 6, font:{size:10} }, grid:{display:false} },
-          y: { ticks: { font:{size:10}, callback: v => `$${v.toFixed(0)}` }, grid:{color:"#f3f4f6"} },
+          y: {
+            min: eqMin - eqPad,
+            max: eqMax + eqPad,
+            ticks: { font:{size:10}, callback: v => `$${v.toFixed(0)}` },
+            grid: { color:"#f3f4f6" }
+          },
         },
       },
     });
   }
 
-  // Daily PnL bar chart
+  // Daily PnL bar chart — auto-scale Y with padding
   const dCanvas = document.getElementById("mt5-daily-chart");
   if (dCanvas && s.daily_pnl && s.daily_pnl.length > 0) {
     if (mt5DailyChart) mt5DailyChart.destroy();
+    const pnlVals = s.daily_pnl.map(p => p.pnl);
+    const pnlMin = Math.min(...pnlVals);
+    const pnlMax = Math.max(...pnlVals);
+    const pnlPad = Math.max(Math.abs(pnlMax - pnlMin) * 0.25, 20);
     mt5DailyChart = new Chart(dCanvas, {
       type: "bar",
       data: {
         labels: s.daily_pnl.map(p => p.day),
         datasets: [{
           label: "Daily P&L",
-          data:  s.daily_pnl.map(p => p.pnl),
-          backgroundColor: s.daily_pnl.map(p => p.pnl >= 0 ? "rgba(22,163,74,0.7)" : "rgba(220,38,38,0.7)"),
+          data:  pnlVals,
+          backgroundColor: pnlVals.map(v => v >= 0 ? "rgba(22,163,74,0.7)" : "rgba(220,38,38,0.7)"),
           borderRadius: 4,
         }],
       },
@@ -2544,7 +2560,12 @@ function renderMT5Charts(s) {
         plugins: { legend: { display: false } },
         scales: {
           x: { ticks: { maxTicksLimit: 8, font:{size:10} }, grid:{display:false} },
-          y: { ticks: { font:{size:10}, callback: v => `$${v.toFixed(0)}` }, grid:{color:"#f3f4f6"} },
+          y: {
+            min: pnlMin - pnlPad,
+            max: pnlMax + pnlPad,
+            ticks: { font:{size:10}, callback: v => `$${v.toFixed(0)}` },
+            grid: { color:"#f3f4f6" }
+          },
         },
       },
     });
