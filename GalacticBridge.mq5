@@ -19,6 +19,7 @@ struct TicketSnap {
 };
 
 TicketSnap snaps[];
+datetime   lastAccountPush = 0;   // throttle account pushes to every 5 s
 
 // ── helpers ────────────────────────────────────────────────────────
 string SideStr(ENUM_ORDER_TYPE t) {
@@ -65,7 +66,34 @@ void PushTrade(string event_type,
     );
     HttpPost(body);
 }
-
+// ── Push live account snapshot ─────────────────────────────────────
+void PushAccount() {
+    char   req_body[], resp_body[];
+    string resp_headers;
+    double balance     = AccountInfoDouble(ACCOUNT_BALANCE);
+    double equity      = AccountInfoDouble(ACCOUNT_EQUITY);
+    double margin      = AccountInfoDouble(ACCOUNT_MARGIN);
+    double freeMargin  = AccountInfoDouble(ACCOUNT_FREEMARGIN);
+    double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+    double floatPnl    = equity - balance;
+    string currency    = AccountInfoString(ACCOUNT_CURRENCY);
+    int    openPos     = PositionsTotal();
+    string body = StringFormat(
+        "{\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,"
+        "\"free_margin\":%.2f,\"margin_level\":%.2f,\"float_pnl\":%.2f,"
+        "\"open_positions\":%d,\"account\":\"%I64u\","
+        "\"broker\":\"%s\",\"currency\":\"%s\"}",
+        balance, equity, margin, freeMargin, marginLevel, floatPnl,
+        openPos, AccountInfoInteger(ACCOUNT_LOGIN),
+        AccountInfoString(ACCOUNT_COMPANY), currency
+    );
+    StringToCharArray(body, req_body, 0, StringLen(body));
+    string url     = "http://" + HOST + ":" + IntegerToString(PORT) + "/api/mt5/account";
+    string headers = "Content-Type: application/json\r\nX-API-Key: " + API_KEY + "\r\n";
+    int res = WebRequest("POST", url, headers, 5000, req_body, resp_body, resp_headers);
+    if (res == -1 && LOG_ALL)
+        Print("GalacticBridge: account push failed — add ", url, " to allowed URLs");
+}
 // ── EA lifecycle ────────────────────────────────────────────────────
 int OnInit() {
     Print("GalacticBridge initialised — pushing to ", HOST, ":", PORT);
@@ -87,7 +115,11 @@ void OnDeinit(const int reason) {
 }
 
 // ── Main polling tick ───────────────────────────────────────────────
-void OnTick() {
+void OnTick() {    // Push live account snapshot every 5 seconds
+    if (TimeCurrent() - lastAccountPush >= 5) {
+        PushAccount();
+        lastAccountPush = TimeCurrent();
+    }
     // Check for newly opened positions
     for (int i = 0; i < PositionsTotal(); i++) {
         ulong ticket = PositionGetTicket(i);

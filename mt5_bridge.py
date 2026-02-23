@@ -55,6 +55,22 @@ async def _init_mt5_tables():
                   AND o.side  != mt5_trades.side
               )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS mt5_account (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                received_at    TEXT    NOT NULL,
+                balance        REAL    NOT NULL DEFAULT 0,
+                equity         REAL    NOT NULL DEFAULT 0,
+                margin         REAL    NOT NULL DEFAULT 0,
+                free_margin    REAL    NOT NULL DEFAULT 0,
+                margin_level   REAL    NOT NULL DEFAULT 0,
+                float_pnl      REAL    NOT NULL DEFAULT 0,
+                open_positions INTEGER NOT NULL DEFAULT 0,
+                account        TEXT,
+                broker         TEXT,
+                currency       TEXT
+            )
+        """)
         await db.commit()
 
 
@@ -196,3 +212,47 @@ async def api_mt5_trades(limit: int = 200):
 @router.get("/api/mt5/stats")
 async def api_mt5_stats():
     return await get_mt5_stats()
+
+
+# ── Route: receive live account snapshot from EA ──────────────────────────────
+@router.post("/api/mt5/account")
+async def receive_mt5_account(
+    request: Request,
+    x_api_key: Optional[str] = Header(None),
+):
+    if x_api_key != MT5_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    payload = await request.json()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO mt5_account
+               (received_at, balance, equity, margin, free_margin, margin_level,
+                float_pnl, open_positions, account, broker, currency)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                datetime.utcnow().isoformat(),
+                float(payload.get("balance", 0)),
+                float(payload.get("equity", 0)),
+                float(payload.get("margin", 0)),
+                float(payload.get("free_margin", 0)),
+                float(payload.get("margin_level", 0)),
+                float(payload.get("float_pnl", 0)),
+                int(payload.get("open_positions", 0)),
+                str(payload.get("account", "")),
+                payload.get("broker", ""),
+                payload.get("currency", ""),
+            ),
+        )
+        await db.commit()
+    return {"status": "ok"}
+
+
+# ── Route: get latest account snapshot ───────────────────────────────────────
+@router.get("/api/mt5/account")
+async def api_mt5_account():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT * FROM mt5_account ORDER BY id DESC LIMIT 1"
+        )).fetchone()
+        return dict(row) if row else {}

@@ -60,6 +60,7 @@ datetime lastBarTime   = 0;
 int      dailyTrades   = 0;
 double   dayStartBal   = 0;
 datetime dayStartDate  = 0;
+datetime lastAccountPush = 0;   // throttle account pushes to every 5 s
 
 //── Init ──────────────────────────────────────────────────────────────────────
 int OnInit()
@@ -110,8 +111,12 @@ void OnTick()
     // ── Only act on new M1 bar close ─────────────────────────────────────────
     datetime barTime = iTime(_Symbol, PERIOD_M1, 0);
     if (barTime == lastBarTime) {
-        // Between bars: manage open positions (breakeven, trail)
+        // Between bars: manage open positions (breakeven, trail) + push account
         ManagePositions();
+        if (TimeCurrent() - lastAccountPush >= 5) {
+            GT_PushAccount();
+            lastAccountPush = TimeCurrent();
+        }
         return;
     }
     lastBarTime = barTime;
@@ -426,7 +431,34 @@ bool FetchBuffer(int handle, double &buf[], int count, int bufIdx = 0)
     if (CopyBuffer(handle, bufIdx, 0, count, buf) < count) return false;
     return true;
 }
-
+//── Galactic Trader bridge push (account snapshot) ───────────────────────
+void GT_PushAccount() {
+    char   req_body[], resp_body[];
+    string resp_headers;
+    double balance     = AccountInfoDouble(ACCOUNT_BALANCE);
+    double equity      = AccountInfoDouble(ACCOUNT_EQUITY);
+    double margin      = AccountInfoDouble(ACCOUNT_MARGIN);
+    double freeMargin  = AccountInfoDouble(ACCOUNT_FREEMARGIN);
+    double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+    double floatPnl    = equity - balance;
+    string currency    = AccountInfoString(ACCOUNT_CURRENCY);
+    int    openPos     = PositionsTotal();
+    string body = StringFormat(
+        "{\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,"
+        "\"free_margin\":%.2f,\"margin_level\":%.2f,\"float_pnl\":%.2f,"
+        "\"open_positions\":%d,\"account\":\"%I64u\","
+        "\"broker\":\"%s\",\"currency\":\"%s\"}",
+        balance, equity, margin, freeMargin, marginLevel, floatPnl,
+        openPos, AccountInfoInteger(ACCOUNT_LOGIN),
+        AccountInfoString(ACCOUNT_COMPANY), currency
+    );
+    StringToCharArray(body, req_body, 0, StringLen(body));
+    string url     = "http://" + GT_HOST + ":" + IntegerToString(GT_PORT) + "/api/mt5/account";
+    string headers = "Content-Type: application/json\r\nX-API-Key: " + GT_API_KEY + "\r\n";
+    int res = WebRequest("POST", url, headers, 5000, req_body, resp_body, resp_headers);
+    if (res == -1 && GT_LOG)
+        Print("GalacticScalperEA: account push failed — add ", url, " to allowed URLs");
+}
 //── Galactic Trader bridge push (open event only) ────────────────────────────
 void GT_PushOpen(ulong ticket, string symbol, string side,
                  double lots, double price, double sl, double tp)
