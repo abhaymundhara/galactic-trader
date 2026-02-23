@@ -21,11 +21,13 @@ Autonomous paper trading agent with a real-time web dashboard.
 ## Quick Start
 
 ### 1. Get a free Alpaca Paper Trading account
+
 → [alpaca.markets](https://alpaca.markets) — create account → Paper Trading → API Keys
 
 ### 2. Clone & run
 
 **macOS / Linux:**
+
 ```bash
 git clone https://github.com/abhaymundhara/galactic-trader.git
 cd galactic-trader
@@ -34,6 +36,7 @@ chmod +x launch.sh
 ```
 
 **Windows (PowerShell):**
+
 ```powershell
 git clone https://github.com/abhaymundhara/galactic-trader.git
 cd galactic-trader
@@ -43,32 +46,33 @@ cd galactic-trader
 Edit `.env` with your Alpaca keys and preferred symbols, then run again.
 
 ### 4. Open the dashboard
+
 → `http://localhost:8080`
 
 ---
 
 ## Configuration (`.env`)
 
-| Variable | Default | Description |
-|---|---|---|
-| `ALPACA_API_KEY` | — | Your Alpaca paper API key |
-| `ALPACA_SECRET_KEY` | — | Your Alpaca paper secret |
-| `SYMBOLS` | `AAPL,MSFT,NVDA,TSLA,AMZN` | Comma-separated tickers |
-| `STARTING_CAPITAL` | `10000` | Starting paper portfolio ($) |
-| `MAX_POSITION_SIZE` | `0.10` | Max 10% per position |
-| `PORT` | `8080` | Dashboard port |
+| Variable            | Default                    | Description                  |
+| ------------------- | -------------------------- | ---------------------------- |
+| `ALPACA_API_KEY`    | —                          | Your Alpaca paper API key    |
+| `ALPACA_SECRET_KEY` | —                          | Your Alpaca paper secret     |
+| `SYMBOLS`           | `AAPL,MSFT,NVDA,TSLA,AMZN` | Comma-separated tickers      |
+| `STARTING_CAPITAL`  | `10000`                    | Starting paper portfolio ($) |
+| `MAX_POSITION_SIZE` | `0.10`                     | Max 10% per position         |
+| `PORT`              | `8080`                     | Dashboard port               |
 
 ---
 
 ## Dashboard
 
-| Section | Shows |
-|---|---|
-| Stats row | Total value, cash, positions value, experiment week (1-6) |
-| P&L chart | Portfolio value over time |
-| Decisions | Latest strategy signal per symbol (action, confidence, reasoning) |
-| Open Positions | Live positions with unrealised P&L |
-| Trade Log | Every executed paper trade |
+| Section        | Shows                                                             |
+| -------------- | ----------------------------------------------------------------- |
+| Stats row      | Total value, cash, positions value, experiment week (1-6)         |
+| P&L chart      | Portfolio value over time                                         |
+| Decisions      | Latest strategy signal per symbol (action, confidence, reasoning) |
+| Open Positions | Live positions with unrealised P&L                                |
+| Trade Log      | Every executed paper trade                                        |
 
 ---
 

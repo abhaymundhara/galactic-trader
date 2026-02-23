@@ -671,7 +671,7 @@
         background: var(--border);
         border-radius: 2px;
       }
-    
+
       /* ── Live Charts ─────────────────────────────────────────── */
       .chart-select {
         font-family: Inter, sans-serif;
@@ -693,10 +693,22 @@
         background: #f3f4f6;
         color: #6b7280;
       }
-      .regime-badge.bull  { background: #dcfce7; color: #16a34a; }
-      .regime-badge.bear  { background: #fee2e2; color: #dc2626; }
-      .regime-badge.volatile { background: #fef3c7; color: #d97706; }
-      .regime-badge.sideways { background: #f3f4f6; color: #6b7280; }
+      .regime-badge.bull {
+        background: #dcfce7;
+        color: #16a34a;
+      }
+      .regime-badge.bear {
+        background: #fee2e2;
+        color: #dc2626;
+      }
+      .regime-badge.volatile {
+        background: #fef3c7;
+        color: #d97706;
+      }
+      .regime-badge.sideways {
+        background: #f3f4f6;
+        color: #6b7280;
+      }
       .btn-refresh {
         font-family: Inter, sans-serif;
         font-size: 12px;
@@ -707,7 +719,9 @@
         color: var(--text-2);
         cursor: pointer;
       }
-      .btn-refresh:hover { background: var(--bg); }
+      .btn-refresh:hover {
+        background: var(--bg);
+      }
       .chart-card {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -730,7 +744,9 @@
         border-radius: 8px;
         color: var(--text-3);
       }
-      .info-pill strong { color: var(--text-1); }
+      .info-pill strong {
+        color: var(--text-1);
+      }
       .section-header {
         display: flex;
         justify-content: space-between;
@@ -742,7 +758,6 @@
         font-weight: 700;
         color: var(--text-1);
       }
-
 
       /* ── Strategy Switcher ──────────────────────────────────────────── */
       .strategy-bar {
@@ -775,15 +790,27 @@
         transition: all 0.15s;
         letter-spacing: 0.3px;
       }
-      .strategy-btn:hover { background: var(--surface); border-color: #9ca3af; }
+      .strategy-btn:hover {
+        background: var(--surface);
+        border-color: #9ca3af;
+      }
       .strategy-btn.active {
         background: #111827;
         color: #fff;
         border-color: #111827;
       }
-      .strategy-btn.active.dhlao { background: #dc2626; border-color: #dc2626; }
-      .strategy-btn.active.macd  { background: #2563eb; border-color: #2563eb; }
-      .strategy-btn.active.bbrsi { background: #16a34a; border-color: #16a34a; }
+      .strategy-btn.active.dhlao {
+        background: #dc2626;
+        border-color: #dc2626;
+      }
+      .strategy-btn.active.macd {
+        background: #2563eb;
+        border-color: #2563eb;
+      }
+      .strategy-btn.active.bbrsi {
+        background: #16a34a;
+        border-color: #16a34a;
+      }
       .strategy-desc {
         font-size: 11px;
         color: var(--text-4);
@@ -807,9 +834,14 @@
         height: 20px;
         flex-shrink: 0;
       }
-      .toggle-switch input { opacity: 0; width: 0; height: 0; }
+      .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
       .toggle-slider {
-        position: absolute; inset: 0;
+        position: absolute;
+        inset: 0;
         background: #d1d5db;
         border-radius: 20px;
         cursor: pointer;
@@ -818,14 +850,20 @@
       .toggle-slider:before {
         content: "";
         position: absolute;
-        width: 14px; height: 14px;
-        left: 3px; top: 3px;
+        width: 14px;
+        height: 14px;
+        left: 3px;
+        top: 3px;
         background: white;
         border-radius: 50%;
         transition: transform 0.2s;
       }
-      input:checked + .toggle-slider { background: #16a34a; }
-      input:checked + .toggle-slider:before { transform: translateX(16px); }
+      input:checked + .toggle-slider {
+        background: #16a34a;
+      }
+      input:checked + .toggle-slider:before {
+        transform: translateX(16px);
+      }
       .loss-limit-val {
         font-size: 12px;
         font-weight: 600;
@@ -833,10 +871,9 @@
         min-width: 28px;
         text-align: right;
       }
-
-</style>
+    </style>
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
-</head>
+  </head>
   <body>
     <div class="app">
       <!-- SIDEBAR -->
@@ -904,20 +941,47 @@
           </div>
         </div>
 
-
         <!-- STRATEGY SWITCHER BAR -->
         <div class="strategy-bar" id="strategy-bar">
           <span class="strategy-bar-label">Strategy</span>
-          <button class="strategy-btn bbrsi active" id="btn-BBRSI" onclick="switchStrategy('BBRSI')">BBRSI</button>
-          <button class="strategy-btn dhlao" id="btn-DHLAO" onclick="switchStrategy('DHLAO')">DHLAO</button>
-          <button class="strategy-btn macd"  id="btn-3MACD" onclick="switchStrategy('3MACD')">3MACD</button>
-          <span class="strategy-desc" id="strategy-desc">Bollinger Bands + RSI · mean-reversion</span>
+          <button
+            class="strategy-btn bbrsi active"
+            id="btn-BBRSI"
+            onclick="switchStrategy('BBRSI')"
+          >
+            BBRSI
+          </button>
+          <button
+            class="strategy-btn dhlao"
+            id="btn-DHLAO"
+            onclick="switchStrategy('DHLAO')"
+          >
+            DHLAO
+          </button>
+          <button
+            class="strategy-btn macd"
+            id="btn-3MACD"
+            onclick="switchStrategy('3MACD')"
+          >
+            3MACD
+          </button>
+          <span class="strategy-desc" id="strategy-desc"
+            >Bollinger Bands + RSI · mean-reversion</span
+          >
 
           <div class="toggle-wrap">
             <span class="toggle-label">Daily Loss Limit</span>
             <span class="loss-limit-val" id="loss-limit-val">5%</span>
-            <label class="toggle-switch" title="Toggle 5% daily loss limit halt">
-              <input type="checkbox" id="loss-limit-toggle" checked onchange="toggleLossLimit(this.checked)">
+            <label
+              class="toggle-switch"
+              title="Toggle 5% daily loss limit halt"
+            >
+              <input
+                type="checkbox"
+                id="loss-limit-toggle"
+                checked
+                onchange="toggleLossLimit(this.checked)"
+              />
               <span class="toggle-slider"></span>
             </label>
           </div>
@@ -1155,45 +1219,55 @@
         <!-- /content -->
       </div>
 
-          <!-- LIVE CHARTS SECTION -->
-          <div class="page-section" id="page-charts" style="display:none">
-            <div class="section-header">
-              <div class="section-title">Live Charts</div>
-              <div style="display:flex;gap:8px;align-items:center">
-                <select id="chart-symbol-select" class="chart-select">
-                  <option value="">Loading symbols…</option>
-                </select>
-                <span id="regime-badge" class="regime-badge">—</span>
-                <button onclick="loadLiveChart()" class="btn-refresh">↻ Refresh</button>
-              </div>
-            </div>
-
-            <!-- Regime + drawdown info bar -->
-            <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">
-              <div class="info-pill">Drawdown: <strong id="chart-drawdown">—</strong></div>
-              <div class="info-pill">Circuit Halt: <strong id="chart-halt">—</strong></div>
-              <div class="info-pill">Last Price: <strong id="chart-last-price">—</strong></div>
-            </div>
-
-            <!-- Candlestick + EMA chart -->
-            <div class="chart-card">
-              <div class="chart-label">Price · EMA 9/21</div>
-              <div id="candle-chart" style="width:100%;height:320px"></div>
-            </div>
-
-            <!-- RSI panel -->
-            <div class="chart-card" style="margin-top:12px">
-              <div class="chart-label">RSI (14)</div>
-              <div id="rsi-chart" style="width:100%;height:140px"></div>
-            </div>
-
-            <!-- Volume panel -->
-            <div class="chart-card" style="margin-top:12px">
-              <div class="chart-label">Volume</div>
-              <div id="vol-chart" style="width:100%;height:120px"></div>
-            </div>
+      <!-- LIVE CHARTS SECTION -->
+      <div class="page-section" id="page-charts" style="display: none">
+        <div class="section-header">
+          <div class="section-title">Live Charts</div>
+          <div style="display: flex; gap: 8px; align-items: center">
+            <select id="chart-symbol-select" class="chart-select">
+              <option value="">Loading symbols…</option>
+            </select>
+            <span id="regime-badge" class="regime-badge">—</span>
+            <button onclick="loadLiveChart()" class="btn-refresh">
+              ↻ Refresh
+            </button>
           </div>
-          <!-- /LIVE CHARTS SECTION -->
+        </div>
+
+        <!-- Regime + drawdown info bar -->
+        <div
+          style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap"
+        >
+          <div class="info-pill">
+            Drawdown: <strong id="chart-drawdown">—</strong>
+          </div>
+          <div class="info-pill">
+            Circuit Halt: <strong id="chart-halt">—</strong>
+          </div>
+          <div class="info-pill">
+            Last Price: <strong id="chart-last-price">—</strong>
+          </div>
+        </div>
+
+        <!-- Candlestick + EMA chart -->
+        <div class="chart-card">
+          <div class="chart-label">Price · EMA 9/21</div>
+          <div id="candle-chart" style="width: 100%; height: 320px"></div>
+        </div>
+
+        <!-- RSI panel -->
+        <div class="chart-card" style="margin-top: 12px">
+          <div class="chart-label">RSI (14)</div>
+          <div id="rsi-chart" style="width: 100%; height: 140px"></div>
+        </div>
+
+        <!-- Volume panel -->
+        <div class="chart-card" style="margin-top: 12px">
+          <div class="chart-label">Volume</div>
+          <div id="vol-chart" style="width: 100%; height: 120px"></div>
+        </div>
+      </div>
+      <!-- /LIVE CHARTS SECTION -->
 
       <!-- /main -->
     </div>
@@ -1678,7 +1752,8 @@
       fetch("/api/status")
         .then((r) => r.json())
         .then((s) => {
-          document.getElementById("model-label").textContent = s.active_strategy || "Strategy Engine";
+          document.getElementById("model-label").textContent =
+            s.active_strategy || "Strategy Engine";
         });
 
       loadTrades();
@@ -1689,9 +1764,13 @@
       setInterval(loadAnalytics, 30000);
 
       // ══ LIVE CHARTS ══════════════════════════════════════════════════════
-      let candleChart = null, emaFast = null, emaSlow = null;
-      let rsiChart = null, rsiLine = null;
-      let volChart = null, volSeries = null;
+      let candleChart = null,
+        emaFast = null,
+        emaSlow = null;
+      let rsiChart = null,
+        rsiLine = null;
+      let volChart = null,
+        volSeries = null;
       let currentChartSymbol = null;
       let chartAutoRefreshTimer = null;
       let lastWsRegime = {};
@@ -1699,19 +1778,36 @@
 
       // Lightweight-charts colour scheme
       const LC_THEME = {
-        bg: "#ffffff", grid: "#f3f4f6",
-        text: "#6b7280", border: "#e5e7eb",
-        upColor: "#16a34a", downColor: "#dc2626",
-        emaFastColor: "#2563eb", emaSlowColor: "#d97706",
-        rsiColor: "#7c3aed", rsiOb: "#fee2e2", rsiOs: "#dcfce7",
-        volUp: "rgba(22,163,74,0.5)", volDown: "rgba(220,38,38,0.5)",
+        bg: "#ffffff",
+        grid: "#f3f4f6",
+        text: "#6b7280",
+        border: "#e5e7eb",
+        upColor: "#16a34a",
+        downColor: "#dc2626",
+        emaFastColor: "#2563eb",
+        emaSlowColor: "#d97706",
+        rsiColor: "#7c3aed",
+        rsiOb: "#fee2e2",
+        rsiOs: "#dcfce7",
+        volUp: "rgba(22,163,74,0.5)",
+        volDown: "rgba(220,38,38,0.5)",
       };
 
       function initCharts() {
         const baseOpts = {
-          layout: { background: { color: LC_THEME.bg }, textColor: LC_THEME.text },
-          grid: { vertLines: { color: LC_THEME.grid }, horzLines: { color: LC_THEME.grid } },
-          timeScale: { borderColor: LC_THEME.border, timeVisible: true, secondsVisible: false },
+          layout: {
+            background: { color: LC_THEME.bg },
+            textColor: LC_THEME.text,
+          },
+          grid: {
+            vertLines: { color: LC_THEME.grid },
+            horzLines: { color: LC_THEME.grid },
+          },
+          timeScale: {
+            borderColor: LC_THEME.border,
+            timeVisible: true,
+            secondsVisible: false,
+          },
           rightPriceScale: { borderColor: LC_THEME.border },
           crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
           handleScroll: true,
@@ -1722,16 +1818,32 @@
         const candleEl = document.getElementById("candle-chart");
         if (candleEl) {
           if (candleChart) candleChart.remove();
-          candleChart = LightweightCharts.createChart(candleEl, { ...baseOpts, height: 320 });
+          candleChart = LightweightCharts.createChart(candleEl, {
+            ...baseOpts,
+            height: 320,
+          });
           candleChart.priceScale("right").applyOptions({ autoScale: true });
           const cs = candleChart.addCandlestickSeries({
-            upColor: LC_THEME.upColor, downColor: LC_THEME.downColor,
-            borderUpColor: LC_THEME.upColor, borderDownColor: LC_THEME.downColor,
-            wickUpColor: LC_THEME.upColor, wickDownColor: LC_THEME.downColor,
+            upColor: LC_THEME.upColor,
+            downColor: LC_THEME.downColor,
+            borderUpColor: LC_THEME.upColor,
+            borderDownColor: LC_THEME.downColor,
+            wickUpColor: LC_THEME.upColor,
+            wickDownColor: LC_THEME.downColor,
           });
           cs._tag = "candles";
-          emaFast = candleChart.addLineSeries({ color: LC_THEME.emaFastColor, lineWidth: 1.5, priceLineVisible: false, title: "EMA9" });
-          emaSlow = candleChart.addLineSeries({ color: LC_THEME.emaSlowColor, lineWidth: 1.5, priceLineVisible: false, title: "EMA21" });
+          emaFast = candleChart.addLineSeries({
+            color: LC_THEME.emaFastColor,
+            lineWidth: 1.5,
+            priceLineVisible: false,
+            title: "EMA9",
+          });
+          emaSlow = candleChart.addLineSeries({
+            color: LC_THEME.emaSlowColor,
+            lineWidth: 1.5,
+            priceLineVisible: false,
+            title: "EMA21",
+          });
           candleChart._cs = cs;
         }
 
@@ -1739,27 +1851,61 @@
         const rsiEl = document.getElementById("rsi-chart");
         if (rsiEl) {
           if (rsiChart) rsiChart.remove();
-          rsiChart = LightweightCharts.createChart(rsiEl, { ...baseOpts, height: 140 });
-          rsiLine = rsiChart.addLineSeries({ color: LC_THEME.rsiColor, lineWidth: 1.5, priceLineVisible: false });
+          rsiChart = LightweightCharts.createChart(rsiEl, {
+            ...baseOpts,
+            height: 140,
+          });
+          rsiLine = rsiChart.addLineSeries({
+            color: LC_THEME.rsiColor,
+            lineWidth: 1.5,
+            priceLineVisible: false,
+          });
           // OB/OS reference bands via price lines
-          rsiLine.createPriceLine({ price: 70, color: "#dc2626", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: "OB" });
-          rsiLine.createPriceLine({ price: 30, color: "#16a34a", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: "OS" });
+          rsiLine.createPriceLine({
+            price: 70,
+            color: "#dc2626",
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: "OB",
+          });
+          rsiLine.createPriceLine({
+            price: 30,
+            color: "#16a34a",
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: "OS",
+          });
         }
 
         // Volume chart
         const volEl = document.getElementById("vol-chart");
         if (volEl) {
           if (volChart) volChart.remove();
-          volChart = LightweightCharts.createChart(volEl, { ...baseOpts, height: 120 });
-          volSeries = volChart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "" });
-          volChart.priceScale("").applyOptions({ scaleMargins: { top: 0.2, bottom: 0 } });
+          volChart = LightweightCharts.createChart(volEl, {
+            ...baseOpts,
+            height: 120,
+          });
+          volSeries = volChart.addHistogramSeries({
+            priceFormat: { type: "volume" },
+            priceScaleId: "",
+          });
+          volChart
+            .priceScale("")
+            .applyOptions({ scaleMargins: { top: 0.2, bottom: 0 } });
         }
 
         // Sync crosshairs across all three charts
         function syncCrosshair(src, ...targets) {
           src.subscribeCrosshairMove((param) => {
-            if (!param.time) { targets.forEach(t => t.clearCrosshairPosition()); return; }
-            targets.forEach(t => t.setCrosshairPosition(0, param.time, t.series?.[0]));
+            if (!param.time) {
+              targets.forEach((t) => t.clearCrosshairPosition());
+              return;
+            }
+            targets.forEach((t) =>
+              t.setCrosshairPosition(0, param.time, t.series?.[0]),
+            );
           });
         }
         if (candleChart && rsiChart && volChart) {
@@ -1786,19 +1932,25 @@
       function computeRSI(closes, period = 14) {
         if (closes.length < period + 1) return [];
         const result = new Array(period).fill(null);
-        let avgGain = 0, avgLoss = 0;
+        let avgGain = 0,
+          avgLoss = 0;
         for (let i = 1; i <= period; i++) {
           const d = closes[i] - closes[i - 1];
-          if (d >= 0) avgGain += d; else avgLoss -= d;
+          if (d >= 0) avgGain += d;
+          else avgLoss -= d;
         }
-        avgGain /= period; avgLoss /= period;
+        avgGain /= period;
+        avgLoss /= period;
         result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
         for (let i = period + 1; i < closes.length; i++) {
           const d = closes[i] - closes[i - 1];
-          const gain = d > 0 ? d : 0, loss = d < 0 ? -d : 0;
+          const gain = d > 0 ? d : 0,
+            loss = d < 0 ? -d : 0;
           avgGain = (avgGain * (period - 1) + gain) / period;
           avgLoss = (avgLoss * (period - 1) + loss) / period;
-          result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
+          result.push(
+            avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss),
+          );
         }
         return result;
       }
@@ -1812,14 +1964,19 @@
         const regime = (lastWsRegime[symbol] || "range").toLowerCase();
         const badge = document.getElementById("regime-badge");
         badge.textContent = regime;
-        badge.className = "regime-badge " + (regime === "trend" ? "bull" : regime);
+        badge.className =
+          "regime-badge " + (regime === "trend" ? "bull" : regime);
 
         // Update last price
         const lp = lastWsPrices[symbol];
-        if (lp) document.getElementById("chart-last-price").textContent = "$" + lp.toFixed(4);
+        if (lp)
+          document.getElementById("chart-last-price").textContent =
+            "$" + lp.toFixed(4);
 
         try {
-          const r = await fetch("/api/candles/" + encodeURIComponent(symbol) + "?limit=120");
+          const r = await fetch(
+            "/api/candles/" + encodeURIComponent(symbol) + "?limit=120",
+          );
           const bars = await r.json();
           if (!bars || bars.error || !bars.length) return;
 
@@ -1831,22 +1988,40 @@
             return Math.floor(d.getTime() / 1000);
           };
 
-          const candleData = bars.map(b => ({ time: toTs(b.time), open: b.open, high: b.high, low: b.low, close: b.close }));
-          const closes = bars.map(b => b.close);
-          const times = bars.map(b => toTs(b.time));
+          const candleData = bars.map((b) => ({
+            time: toTs(b.time),
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+          }));
+          const closes = bars.map((b) => b.close);
+          const times = bars.map((b) => toTs(b.time));
 
           // EMA overlays
-          const ema9v  = computeEMA(closes, 9);
+          const ema9v = computeEMA(closes, 9);
           const ema21v = computeEMA(closes, 21);
-          const ema9Data  = times.map((t, i) => ema9v[i]  != null ? { time: t, value: ema9v[i]  } : null).filter(Boolean);
-          const ema21Data = times.map((t, i) => ema21v[i] != null ? { time: t, value: ema21v[i] } : null).filter(Boolean);
+          const ema9Data = times
+            .map((t, i) =>
+              ema9v[i] != null ? { time: t, value: ema9v[i] } : null,
+            )
+            .filter(Boolean);
+          const ema21Data = times
+            .map((t, i) =>
+              ema21v[i] != null ? { time: t, value: ema21v[i] } : null,
+            )
+            .filter(Boolean);
 
           // RSI
           const rsiV = computeRSI(closes, 14);
-          const rsiData = times.map((t, i) => rsiV[i] != null ? { time: t, value: rsiV[i] } : null).filter(Boolean);
+          const rsiData = times
+            .map((t, i) =>
+              rsiV[i] != null ? { time: t, value: rsiV[i] } : null,
+            )
+            .filter(Boolean);
 
           // Volume
-          const volData = bars.map(b => ({
+          const volData = bars.map((b) => ({
             time: toTs(b.time),
             value: b.volume,
             color: b.close >= b.open ? LC_THEME.volUp : LC_THEME.volDown,
@@ -1862,8 +2037,7 @@
           candleChart.timeScale().fitContent();
           rsiChart.timeScale().fitContent();
           volChart.timeScale().fitContent();
-
-        } catch(e) {
+        } catch (e) {
           console.error("Chart load error:", e);
         }
       }
@@ -1874,9 +2048,10 @@
         const sel = document.getElementById("chart-symbol-select");
         const prev = sel.value;
         sel.innerHTML = "";
-        symbols.forEach(s => {
+        symbols.forEach((s) => {
           const opt = document.createElement("option");
-          opt.value = s; opt.textContent = s;
+          opt.value = s;
+          opt.textContent = s;
           if (s === prev || (!prev && s === symbols[0])) opt.selected = true;
           sel.appendChild(opt);
         });
@@ -1898,17 +2073,22 @@
       startChartAutoRefresh();
 
       // ── Navigation ────────────────────────────────────────────────────────
-      document.querySelectorAll(".nav-item").forEach(link => {
+      document.querySelectorAll(".nav-item").forEach((link) => {
         link.addEventListener("click", (e) => {
           e.preventDefault();
-          document.querySelectorAll(".nav-item").forEach(l => l.classList.remove("active"));
+          document
+            .querySelectorAll(".nav-item")
+            .forEach((l) => l.classList.remove("active"));
           link.classList.add("active");
           const href = link.getAttribute("href").replace("#", "");
           // Show/hide page sections (assumes sections have id="page-{name}")
           const chartsPage = document.getElementById("page-charts");
           if (href === "charts") {
             chartsPage.style.display = "block";
-            loadLiveChart(document.getElementById("chart-symbol-select").value || Object.keys(lastWsRegime)[0]);
+            loadLiveChart(
+              document.getElementById("chart-symbol-select").value ||
+                Object.keys(lastWsRegime)[0],
+            );
           } else if (chartsPage) {
             chartsPage.style.display = "none";
           }
@@ -1924,18 +2104,26 @@
           if (d.type !== "state") return;
           if (d.regime) lastWsRegime = d.regime;
           if (d.last_prices) lastWsPrices = d.last_prices;
-          if (d.drawdown != null) document.getElementById("chart-drawdown").textContent = d.drawdown.toFixed(2) + "%";
-          document.getElementById("chart-halt").textContent = d.circuit_halt ? "🔴 Halted" : "🟢 OK";
+          if (d.drawdown != null)
+            document.getElementById("chart-drawdown").textContent =
+              d.drawdown.toFixed(2) + "%";
+          document.getElementById("chart-halt").textContent = d.circuit_halt
+            ? "🔴 Halted"
+            : "🟢 OK";
           if (d.last_decisions) updateChartSymbolDropdown(d.last_decisions);
           // Live price update for current symbol
-          if (currentChartSymbol && d.last_prices && d.last_prices[currentChartSymbol]) {
-            document.getElementById("chart-last-price").textContent = "$" + d.last_prices[currentChartSymbol].toFixed(4);
+          if (
+            currentChartSymbol &&
+            d.last_prices &&
+            d.last_prices[currentChartSymbol]
+          ) {
+            document.getElementById("chart-last-price").textContent =
+              "$" + d.last_prices[currentChartSymbol].toFixed(4);
           }
         } catch {}
       };
       // Re-bind patched handler
       if (ws) ws.onmessage = onSocketMessageWithCharts;
-
 
       // ══ STRATEGY SWITCHER ══════════════════════════════════════════════════
       const STRATEGY_DESCS = {
@@ -1943,14 +2131,18 @@
         "3MACD": "Triple MACD · momentum scalper",
         BBRSI: "Bollinger Bands + RSI · mean-reversion",
       };
-      const STRATEGY_CLASSES = { DHLAO: "dhlao", "3MACD": "macd", BBRSI: "bbrsi" };
+      const STRATEGY_CLASSES = {
+        DHLAO: "dhlao",
+        "3MACD": "macd",
+        BBRSI: "bbrsi",
+      };
 
       let _currentStrategy = "BBRSI";
       let _stratSwitching = false;
 
       function updateStrategyUI(name) {
         _currentStrategy = name;
-        document.querySelectorAll(".strategy-btn").forEach(btn => {
+        document.querySelectorAll(".strategy-btn").forEach((btn) => {
           btn.classList.remove("active", "dhlao", "macd", "bbrsi");
           if (btn.id === "btn-" + name) {
             btn.classList.add("active", STRATEGY_CLASSES[name] || "");
@@ -1976,7 +2168,7 @@
             updateStrategyUI(data.active);
             showToast("Strategy: " + data.active);
           }
-        } catch(e) {
+        } catch (e) {
           console.error("Strategy switch failed:", e);
         } finally {
           _stratSwitching = false;
@@ -1992,7 +2184,7 @@
             body: JSON.stringify({ enforce_daily_loss_limit: enabled }),
           });
           showToast("Daily loss limit " + (enabled ? "ON (5%)" : "OFF"));
-        } catch(e) {
+        } catch (e) {
           console.error("Settings update failed:", e);
         }
       }
@@ -2003,18 +2195,21 @@
         if (!t) {
           t = document.createElement("div");
           t.id = "_toast";
-          t.style.cssText = "position:fixed;bottom:24px;right:24px;background:#111827;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;font-family:Inter,sans-serif;z-index:9999;opacity:0;transition:opacity 0.2s";
+          t.style.cssText =
+            "position:fixed;bottom:24px;right:24px;background:#111827;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;font-family:Inter,sans-serif;z-index:9999;opacity:0;transition:opacity 0.2s";
           document.body.appendChild(t);
         }
         t.textContent = msg;
         t.style.opacity = "1";
         clearTimeout(t._timer);
-        t._timer = setTimeout(() => { t.style.opacity = "0"; }, 2500);
+        t._timer = setTimeout(() => {
+          t.style.opacity = "0";
+        }, 2500);
       }
 
       // Sync strategy from WS state
       const _origOnMsg = ws.onmessage;
-      ws.onmessage = function(e) {
+      ws.onmessage = function (e) {
         if (_origOnMsg) _origOnMsg.call(this, e);
         try {
           const d = JSON.parse(e.data);
@@ -2036,18 +2231,24 @@
       };
 
       // Load initial strategy on page load
-      fetch("/api/strategy").then(r => r.json()).then(d => {
-        if (d.active) updateStrategyUI(d.active);
-      }).catch(() => {});
-      fetch("/api/settings").then(r => r.json()).then(d => {
-        const toggle = document.getElementById("loss-limit-toggle");
-        if (toggle && typeof d.enforce_daily_loss_limit === "boolean") {
-          toggle.checked = d.enforce_daily_loss_limit;
-        }
-        const val = document.getElementById("loss-limit-val");
-        if (val && d.daily_loss_limit_pct) val.textContent = d.daily_loss_limit_pct.toFixed(0) + "%";
-      }).catch(() => {});
-
+      fetch("/api/strategy")
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.active) updateStrategyUI(d.active);
+        })
+        .catch(() => {});
+      fetch("/api/settings")
+        .then((r) => r.json())
+        .then((d) => {
+          const toggle = document.getElementById("loss-limit-toggle");
+          if (toggle && typeof d.enforce_daily_loss_limit === "boolean") {
+            toggle.checked = d.enforce_daily_loss_limit;
+          }
+          const val = document.getElementById("loss-limit-val");
+          if (val && d.daily_loss_limit_pct)
+            val.textContent = d.daily_loss_limit_pct.toFixed(0) + "%";
+        })
+        .catch(() => {});
     </script>
   </body>
 </html>
