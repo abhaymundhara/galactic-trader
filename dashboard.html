@@ -362,6 +362,26 @@ tr:hover td { background: var(--surface-2); }
 .s-none { background: var(--border); }
 .streak-label { font-size: 11px; color: var(--text-3); margin-left: 8px; }
 
+/* ── Page routing ── */
+.page { display: none; }
+.page.active { display: block; }
+.acct-select {
+  background: var(--surface-2); color: var(--text-1);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 5px 10px; font-size: 12px; font-weight: 600;
+  cursor: pointer; outline: none; min-width: 160px;
+}
+.acct-select option { background: var(--surface-2); }
+.acct-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px 20px; margin-bottom: 18px;
+}
+.acct-card-header {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+}
+.acct-card-title { font-size: 14px; font-weight: 700; }
+.acct-card-broker { font-size: 11px; color: var(--text-3); }
+
 /* ── Footer status bar ── */
 .status-bar {
   position: fixed; bottom: 0; left: 220px; right: 0; height: 28px;
@@ -393,36 +413,33 @@ tr:hover td { background: var(--surface-2); }
   </div>
   <nav class="sidebar-nav">
     <div class="nav-section">Overview</div>
-    <a class="nav-item active" href="#" onclick="return false">
+    <a class="nav-item active" href="#" data-page="dashboard" onclick="navTo('dashboard');return false">
       <span class="ni">📊</span> Dashboard
     </a>
-    <a class="nav-item" href="#" onclick="return false">
+    <a class="nav-item" href="#" data-page="equity" onclick="navTo('equity');return false">
       <span class="ni">📈</span> Equity Curve
     </a>
-    <a class="nav-item" href="#" onclick="return false">
+    <a class="nav-item" href="#" data-page="daily" onclick="navTo('daily');return false">
       <span class="ni">🗓️</span> Daily P&L
     </a>
 
     <div class="nav-section">Trading</div>
-    <a class="nav-item" href="#" onclick="return false">
+    <a class="nav-item" href="#" data-page="trades" onclick="navTo('trades');return false">
       <span class="ni">📋</span> Trade Log
       <span class="nav-badge" id="nav-open-count">—</span>
     </a>
-    <a class="nav-item" href="#" onclick="return false">
+    <a class="nav-item" href="#" data-page="strategies" onclick="navTo('strategies');return false">
       <span class="ni">⚡</span> Strategies
     </a>
-    <a class="nav-item" href="#" onclick="return false">
+    <a class="nav-item" href="#" data-page="risk" onclick="navTo('risk');return false">
       <span class="ni">🛡️</span> Risk Monitor
     </a>
 
-    <div class="nav-section">Analysis</div>
-    <a class="nav-item" href="#" onclick="return false">
-      <span class="ni">🎯</span> Performance
+    <div class="nav-section">Accounts</div>
+    <a class="nav-item" href="#" data-page="accounts" onclick="navTo('accounts');return false">
+      <span class="ni">🏦</span> All Accounts
     </a>
-    <a class="nav-item" href="#" onclick="return false">
-      <span class="ni">🔥</span> Patterns
-    </a>
-    <a class="nav-item" href="#" onclick="return false">
+    <a class="nav-item" href="#" data-page="connection" onclick="navTo('connection');return false">
       <span class="ni">🔗</span> MT5 Connection
     </a>
   </nav>
@@ -437,10 +454,13 @@ tr:hover td { background: var(--surface-2); }
 <!-- ── Topbar ── -->
 <header class="topbar">
   <div class="topbar-left">
-    <div class="page-title">Dashboard</div>
+    <div class="page-title" id="topbar-title">Dashboard</div>
     <div class="page-sub" id="last-updated">—</div>
   </div>
   <div class="topbar-right">
+    <select id="account-select" class="acct-select" onchange="onAccountChange()">
+      <option value="all">All Accounts</option>
+    </select>
     <button class="btn btn-ghost" onclick="load()">⟳ Refresh</button>
     <button class="btn btn-primary" onclick="load()">⚡ Live</button>
   </div>
@@ -449,205 +469,238 @@ tr:hover td { background: var(--surface-2); }
 <!-- ── Main ── -->
 <main class="main">
 
-  <!-- Connection banner -->
-  <div class="conn-banner">
-    ⚡ EA posts to <code>POST /api/mt5/trade</code> — match
-    <code>MT5_BRIDGE_KEY</code> in <code>.env</code> with EA's <code>API_KEY</code>.
-    Add <code>http://127.0.0.1:8080/api/mt5/trade</code> to MT5 → Tools → Options → Expert Advisors → Allowed URLs.
-  </div>
+  <!-- ── PAGE: dashboard ── -->
+  <div id="page-dashboard" class="page active">
 
-  <!-- Section: KPIs -->
-  <div class="section-title">Performance Overview</div>
-  <div class="kpi-grid">
-    <div class="kpi-card">
-      <div class="kpi-accent kpi-accent-blue"></div>
-      <div class="kpi-icon">📊</div>
-      <div class="kpi-label">Total Trades</div>
-      <div class="kpi-val" id="k-total">—</div>
-      <div class="kpi-sub">closed</div>
+    <!-- Connection banner -->
+    <div class="conn-banner">
+      ⚡ EA posts to <code>POST /api/mt5/trade</code> — match
+      <code>MT5_BRIDGE_KEY</code> in <code>.env</code> with EA's <code>API_KEY</code>.
+      Add <code>http://127.0.0.1:8080/api/mt5/trade</code> to MT5 → Tools → Options → Expert Advisors → Allowed URLs.
     </div>
-    <div class="kpi-card">
-      <div class="kpi-accent kpi-accent-green"></div>
-      <div class="kpi-icon">💰</div>
-      <div class="kpi-label">Net P&L</div>
-      <div class="kpi-val" id="k-pnl">—</div>
-      <div class="kpi-sub">cumulative</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-accent kpi-accent-yellow"></div>
-      <div class="kpi-icon">🎯</div>
-      <div class="kpi-label">Win Rate</div>
-      <div class="kpi-val" id="k-wr">—</div>
-      <div class="kpi-sub" id="k-wl">—W / —L</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-accent kpi-accent-green"></div>
-      <div class="kpi-icon">✅</div>
-      <div class="kpi-label">Avg Win</div>
-      <div class="kpi-val up" id="k-aw">—</div>
-      <div class="kpi-sub">per winning trade</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-accent kpi-accent-red"></div>
-      <div class="kpi-icon">❌</div>
-      <div class="kpi-label">Avg Loss</div>
-      <div class="kpi-val dn" id="k-al">—</div>
-      <div class="kpi-sub">per losing trade</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-accent kpi-accent-purple"></div>
-      <div class="kpi-icon">⚖️</div>
-      <div class="kpi-label">Risk/Reward</div>
-      <div class="kpi-val" id="k-rr">—</div>
-      <div class="kpi-sub">avg RR ratio</div>
-    </div>
-  </div>
 
-  <!-- Section: Challenge Monitor (Prop Firm Mode) -->
-  <div class="section-title">Challenge Monitor</div>
-  <div class="challenge-card">
-    <div class="challenge-header">
-      <div class="title">📋 FTMO-Style Account Tracker — Demo 10009779309</div>
-      <div class="tag" id="challenge-status">Active</div>
+    <!-- KPIs -->
+    <div class="section-title">Performance Overview</div>
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-blue"></div><div class="kpi-icon">📊</div><div class="kpi-label">Total Trades</div><div class="kpi-val" id="k-total">—</div><div class="kpi-sub">closed</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-green"></div><div class="kpi-icon">💰</div><div class="kpi-label">Net P&L</div><div class="kpi-val" id="k-pnl">—</div><div class="kpi-sub">cumulative</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-yellow"></div><div class="kpi-icon">🎯</div><div class="kpi-label">Win Rate</div><div class="kpi-val" id="k-wr">—</div><div class="kpi-sub" id="k-wl">—W / —L</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-green"></div><div class="kpi-icon">✅</div><div class="kpi-label">Avg Win</div><div class="kpi-val up" id="k-aw">—</div><div class="kpi-sub">per winning trade</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-red"></div><div class="kpi-icon">❌</div><div class="kpi-label">Avg Loss</div><div class="kpi-val dn" id="k-al">—</div><div class="kpi-sub">per losing trade</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-purple"></div><div class="kpi-icon">⚖️</div><div class="kpi-label">Risk/Reward</div><div class="kpi-val" id="k-rr">—</div><div class="kpi-sub">avg RR ratio</div></div>
     </div>
-    <div class="challenge-rows">
-      <div class="challenge-item">
-        <div class="ci-label">Profit Target (8%)</div>
-        <div class="ci-val" id="ch-profit-val">$0.00 / $800.00</div>
-        <div class="ci-bar-wrap">
-          <div class="ci-bar ci-bar-profit" id="ch-profit-bar" style="width:0%"></div>
-        </div>
-        <div class="ci-footer">
-          <span id="ch-profit-pct">0%</span>
-          <span>Target: $800</span>
-        </div>
-      </div>
-      <div class="challenge-item">
-        <div class="ci-label">Max Drawdown (10%)</div>
-        <div class="ci-val" id="ch-dd-val">$0.00 / $1,000.00</div>
-        <div class="ci-bar-wrap">
-          <div class="ci-bar ci-bar-loss" id="ch-dd-bar" style="width:0%"></div>
-        </div>
-        <div class="ci-footer">
-          <span id="ch-dd-pct">0%</span>
-          <span>Limit: $1,000</span>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Charts row 1: Equity + Win Rate Ring -->
-  <div class="section-title">Analytics</div>
-  <div class="charts-row">
-    <div class="chart-card">
-      <div class="chart-header">
-        <span class="chart-name">Equity Curve</span>
-        <span class="chart-meta" id="eq-meta">—</span>
+    <!-- Challenge Monitor -->
+    <div class="section-title">Challenge Monitor</div>
+    <div class="challenge-card">
+      <div class="challenge-header">
+        <div class="title">📋 FTMO-Style Tracker — <span id="ch-account-label">All Accounts</span></div>
+        <div class="tag" id="challenge-status">Active</div>
       </div>
-      <div class="canvas-wrap" style="height:220px">
-        <canvas id="eq-chart"></canvas>
-      </div>
-    </div>
-    <div class="chart-card">
-      <div class="chart-header">
-        <span class="chart-name">Win / Loss</span>
-        <span class="chart-meta">by trade count</span>
-      </div>
-      <div class="ring-wrap">
-        <canvas id="wr-chart"></canvas>
-        <div class="ring-center">
-          <div class="ring-pct" id="wr-pct">—</div>
-          <div class="ring-lbl">Win Rate</div>
+      <div class="challenge-rows">
+        <div class="challenge-item">
+          <div class="ci-label">Profit Target (8%)</div>
+          <div class="ci-val" id="ch-profit-val">$0.00 / $800.00</div>
+          <div class="ci-bar-wrap"><div class="ci-bar ci-bar-profit" id="ch-profit-bar" style="width:0%"></div></div>
+          <div class="ci-footer"><span id="ch-profit-pct">0%</span><span>Target: $800</span></div>
+        </div>
+        <div class="challenge-item">
+          <div class="ci-label">Max Drawdown (10%)</div>
+          <div class="ci-val" id="ch-dd-val">$0.00 / $1,000.00</div>
+          <div class="ci-bar-wrap"><div class="ci-bar ci-bar-loss" id="ch-dd-bar" style="width:0%"></div></div>
+          <div class="ci-footer"><span id="ch-dd-pct">0%</span><span>Limit: $1,000</span></div>
         </div>
       </div>
-      <div class="ring-legend" style="justify-content:center">
-        <div class="rl-item"><div class="rl-dot" style="background:var(--green)"></div>Wins</div>
-        <div class="rl-item"><div class="rl-dot" style="background:var(--red)"></div>Losses</div>
-      </div>
     </div>
-  </div>
 
-  <!-- Charts row 2: Daily PnL + Streak -->
-  <div class="chart-row-2">
-    <div class="chart-card">
-      <div class="chart-header">
-        <span class="chart-name">Daily P&L</span>
-        <span class="chart-meta" id="pnl-meta">—</span>
+    <!-- Charts row 1: Equity + Win Rate Ring -->
+    <div class="section-title">Analytics</div>
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-header"><span class="chart-name">Equity Curve</span><span class="chart-meta" id="eq-meta">—</span></div>
+        <div class="canvas-wrap" style="height:220px"><canvas id="eq-chart"></canvas></div>
       </div>
-      <div class="canvas-wrap" style="height:200px">
-        <canvas id="pnl-chart"></canvas>
-      </div>
-    </div>
-    <div class="chart-card">
-      <div class="chart-header">
-        <span class="chart-name">Trade Streak</span>
-        <span class="chart-meta">last 20 trades</span>
-      </div>
-      <div class="streak-row" id="streak-row">
-        <span style="font-size:12px;color:var(--text-3)">No trades yet</span>
-      </div>
-      <div style="padding:0 18px 16px">
-        <div style="font-size:11px;color:var(--text-3);margin-top:8px">
-          Current streak: <span id="streak-label" style="font-weight:700;color:var(--text-1)">—</span>
+      <div class="chart-card">
+        <div class="chart-header"><span class="chart-name">Win / Loss</span><span class="chart-meta">by trade count</span></div>
+        <div class="ring-wrap">
+          <canvas id="wr-chart"></canvas>
+          <div class="ring-center"><div class="ring-pct" id="wr-pct">—</div><div class="ring-lbl">Win Rate</div></div>
+        </div>
+        <div class="ring-legend" style="justify-content:center">
+          <div class="rl-item"><div class="rl-dot" style="background:var(--green)"></div>Wins</div>
+          <div class="rl-item"><div class="rl-dot" style="background:var(--red)"></div>Losses</div>
         </div>
       </div>
+    </div>
 
-      <!-- Risk Monitor embedded -->
-      <div style="padding:0 18px 14px; border-top:1px solid var(--border-light); margin-top:4px">
-        <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;padding-top:14px;margin-bottom:12px">Risk Exposure</div>
-        <div class="risk-grid" style="padding:0;gap:10px">
-          <div class="risk-item">
-            <div class="ri-label">Daily P&L</div>
-            <div class="ri-val" id="r-daily-pnl">—</div>
-            <div class="risk-bar-wrap"><div class="risk-bar risk-safe" id="r-daily-bar" style="width:0%"></div></div>
-          </div>
-          <div class="risk-item">
-            <div class="ri-label">Open Trades</div>
-            <div class="ri-val" id="r-open">—</div>
-            <div class="risk-bar-wrap"><div class="risk-bar risk-safe" id="r-open-bar" style="width:0%"></div></div>
+    <!-- Charts row 2 -->
+    <div class="chart-row-2">
+      <div class="chart-card">
+        <div class="chart-header"><span class="chart-name">Daily P&L</span><span class="chart-meta" id="pnl-meta">—</span></div>
+        <div class="canvas-wrap" style="height:200px"><canvas id="pnl-chart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-header"><span class="chart-name">Trade Streak</span><span class="chart-meta">last 20 trades</span></div>
+        <div class="streak-row" id="streak-row"><span style="font-size:12px;color:var(--text-3)">No trades yet</span></div>
+        <div style="padding:0 18px 16px">
+          <div style="font-size:11px;color:var(--text-3);margin-top:8px">Current streak: <span id="streak-label" style="font-weight:700;color:var(--text-1)">—</span></div>
+        </div>
+        <div style="padding:0 18px 14px;border-top:1px solid var(--border-light);margin-top:4px">
+          <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;padding-top:14px;margin-bottom:12px">Risk Exposure</div>
+          <div class="risk-grid" style="padding:0;gap:10px">
+            <div class="risk-item"><div class="ri-label">Daily P&L</div><div class="ri-val" id="r-daily-pnl">—</div><div class="risk-bar-wrap"><div class="risk-bar risk-safe" id="r-daily-bar" style="width:0%"></div></div></div>
+            <div class="risk-item"><div class="ri-label">Open Trades</div><div class="ri-val" id="r-open">—</div><div class="risk-bar-wrap"><div class="risk-bar risk-safe" id="r-open-bar" style="width:0%"></div></div></div>
           </div>
         </div>
       </div>
     </div>
-  </div>
+  </div><!-- /page-dashboard -->
 
-  <!-- Strategy Breakdown -->
-  <div class="section-title">By Strategy</div>
-  <div class="section-card">
-    <div class="sc-header">
-      <div class="sc-title">Strategy Performance</div>
-      <div class="sc-meta">DHLAO · 3MACD · BBRSI</div>
+  <!-- ── PAGE: equity ── -->
+  <div id="page-equity" class="page">
+    <div class="section-title">Equity Curve — Full View</div>
+    <div class="section-card" style="padding:20px">
+      <div class="chart-header" style="margin-bottom:14px">
+        <span class="chart-name">Cumulative P&L over time</span>
+        <span class="chart-meta" id="eq2-meta">—</span>
+      </div>
+      <div class="canvas-wrap" style="height:400px"><canvas id="eq2-chart"></canvas></div>
     </div>
-    <div id="strat-rows">
-      <div class="strat-row">
-        <div style="font-size:12px;color:var(--text-4);padding:10px 0">No data yet</div>
+    <div class="kpi-grid" style="margin-top:20px">
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-blue"></div><div class="kpi-label">Peak Equity</div><div class="kpi-val" id="eq-peak">—</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-red"></div><div class="kpi-label">Max Drawdown</div><div class="kpi-val dn" id="eq-dd">—</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-green"></div><div class="kpi-label">Net P&L</div><div class="kpi-val" id="eq-net">—</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-yellow"></div><div class="kpi-label">Closed Trades</div><div class="kpi-val" id="eq-trades">—</div></div>
+    </div>
+  </div><!-- /page-equity -->
+
+  <!-- ── PAGE: daily ── -->
+  <div id="page-daily" class="page">
+    <div class="section-title">Daily P&L — Full View</div>
+    <div class="section-card" style="padding:20px">
+      <div class="chart-header" style="margin-bottom:14px">
+        <span class="chart-name">P&L per trading day</span>
+        <span class="chart-meta" id="daily2-meta">—</span>
+      </div>
+      <div class="canvas-wrap" style="height:360px"><canvas id="daily2-chart"></canvas></div>
+    </div>
+    <div class="section-card" style="margin-top:16px">
+      <div class="sc-header"><div class="sc-title">Day-by-Day Breakdown</div></div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>Date</th><th>P&L</th><th>Trades</th><th>Result</th></tr></thead>
+          <tbody id="daily-table-body"><tr><td colspan="4" class="empty-row">No data</td></tr></tbody>
+        </table>
       </div>
     </div>
-  </div>
+  </div><!-- /page-daily -->
 
-  <!-- Trade Log -->
-  <div class="section-title">Trade Log</div>
-  <div class="section-card">
-    <div class="sc-header">
-      <div class="sc-title">All Trades</div>
-      <div class="sc-meta" id="trade-count">—</div>
-      <button class="btn btn-ghost" onclick="load()" style="margin-left:12px">⟳ Refresh</button>
+  <!-- ── PAGE: trades ── -->
+  <div id="page-trades" class="page">
+    <div class="section-title">Trade Log</div>
+    <div class="section-card">
+      <div class="sc-header">
+        <div class="sc-title">All Trades</div>
+        <div class="sc-meta" id="trade-count">—</div>
+        <button class="btn btn-ghost" onclick="load()" style="margin-left:12px">⟳ Refresh</button>
+      </div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>#</th><th>Account</th><th>Time</th><th>Symbol</th><th>Event</th><th>Side</th><th>Lots</th><th>Open</th><th>Close</th><th>SL</th><th>TP</th><th>P&L</th><th>Strategy</th></tr></thead>
+          <tbody id="trade-body"><tr><td colspan="13" class="empty-row">No trades yet — EA is listening…</td></tr></tbody>
+        </table>
+      </div>
     </div>
-    <div class="tbl-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th><th>Time</th><th>Symbol</th><th>Event</th>
-            <th>Side</th><th>Lots</th><th>Open</th><th>Close</th>
-            <th>SL</th><th>TP</th><th>P&L</th><th>Strategy</th>
-          </tr>
-        </thead>
-        <tbody id="trade-body">
-          <tr><td colspan="12" class="empty-row">No trades yet — EA is listening…</td></tr>
-        </tbody>
-      </table>
+  </div><!-- /page-trades -->
+
+  <!-- ── PAGE: strategies ── -->
+  <div id="page-strategies" class="page">
+    <div class="section-title">Strategy Breakdown</div>
+    <div class="section-card">
+      <div class="sc-header"><div class="sc-title">Strategy Performance</div><div class="sc-meta">DHLAO · 3MACD · BBRSI</div></div>
+      <div id="strat-rows"><div class="strat-row"><div style="font-size:12px;color:var(--text-4);padding:10px 0">No data yet</div></div></div>
     </div>
-  </div>
+    <div class="chart-row-2" style="margin-top:16px">
+      <div class="chart-card">
+        <div class="chart-header"><span class="chart-name">P&L by Strategy</span></div>
+        <div class="canvas-wrap" style="height:260px"><canvas id="strat-chart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-header"><span class="chart-name">Trade Count by Strategy</span></div>
+        <div class="canvas-wrap" style="height:260px"><canvas id="strat-count-chart"></canvas></div>
+      </div>
+    </div>
+  </div><!-- /page-strategies -->
+
+  <!-- ── PAGE: risk ── -->
+  <div id="page-risk" class="page">
+    <div class="section-title">Risk Monitor</div>
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-red"></div><div class="kpi-label">Daily P&L</div><div class="kpi-val" id="risk-daily-pnl">—</div><div class="kpi-sub">vs $500 limit</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-yellow"></div><div class="kpi-label">Open Positions</div><div class="kpi-val" id="risk-open">—</div><div class="kpi-sub">across all accounts</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-purple"></div><div class="kpi-label">Drawdown</div><div class="kpi-val dn" id="risk-dd">—</div><div class="kpi-sub">from peak</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-blue"></div><div class="kpi-label">Win Streak</div><div class="kpi-val" id="risk-streak">—</div><div class="kpi-sub">current run</div></div>
+    </div>
+    <div class="section-title" style="margin-top:8px">Trade Streak (last 40)</div>
+    <div class="section-card">
+      <div class="sc-header"><div class="sc-title">Recent Trades</div></div>
+      <div class="streak-row" id="risk-streak-row" style="padding:16px 18px"><span style="color:var(--text-3);font-size:12px">No trades</span></div>
+    </div>
+    <div class="section-title">Challenge Progress</div>
+    <div class="challenge-card">
+      <div class="challenge-header">
+        <div class="title">📋 FTMO-Style Tracker</div>
+        <div class="tag" id="risk-challenge-status">Active</div>
+      </div>
+      <div class="challenge-rows">
+        <div class="challenge-item">
+          <div class="ci-label">Profit Target (8%)</div>
+          <div class="ci-val" id="risk-ch-profit-val">$0.00 / $800.00</div>
+          <div class="ci-bar-wrap"><div class="ci-bar ci-bar-profit" id="risk-ch-profit-bar" style="width:0%"></div></div>
+          <div class="ci-footer"><span id="risk-ch-profit-pct">0%</span><span>Target: $800</span></div>
+        </div>
+        <div class="challenge-item">
+          <div class="ci-label">Max Drawdown (10%)</div>
+          <div class="ci-val" id="risk-ch-dd-val">$0.00 / $1,000.00</div>
+          <div class="ci-bar-wrap"><div class="ci-bar ci-bar-loss" id="risk-ch-dd-bar" style="width:0%"></div></div>
+          <div class="ci-footer"><span id="risk-ch-dd-pct">0%</span><span>Limit: $1,000</span></div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /page-risk -->
+
+  <!-- ── PAGE: accounts ── -->
+  <div id="page-accounts" class="page">
+    <div class="section-title">All Accounts</div>
+    <div id="account-cards" class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-blue"></div><div class="kpi-label">Loading…</div><div class="kpi-val">—</div></div>
+    </div>
+    <div class="section-title" style="margin-top:8px">Per-Account Trade Logs</div>
+    <div id="account-tables"></div>
+  </div><!-- /page-accounts -->
+
+  <!-- ── PAGE: connection ── -->
+  <div id="page-connection" class="page">
+    <div class="section-title">MT5 Connection Setup</div>
+    <div class="section-card" style="padding:22px">
+      <div style="font-size:14px;font-weight:700;margin-bottom:16px">Setup Instructions</div>
+      <ol style="font-size:13px;color:var(--text-2);line-height:2;padding-left:20px">
+        <li>In MT5 go to <strong>Tools → Options → Expert Advisors</strong></li>
+        <li>Enable <em>Allow WebRequest for listed URL</em> and add: <code style="background:var(--surface-2);padding:2px 8px;border-radius:4px;font-size:12px">http://127.0.0.1:8080/api/mt5/trade</code></li>
+        <li>Set <code style="background:var(--surface-2);padding:2px 8px;border-radius:4px;font-size:12px">MT5_BRIDGE_KEY</code> in <code style="background:var(--surface-2);padding:2px 8px;border-radius:4px;font-size:12px">.env</code> to match the EA's <code style="background:var(--surface-2);padding:2px 8px;border-radius:4px;font-size:12px">API_KEY</code> input parameter</li>
+        <li>Attach <code style="background:var(--surface-2);padding:2px 8px;border-radius:4px;font-size:12px">GalacticBridge.mq5</code> to any chart for each account</li>
+        <li>Restart the FastAPI server: <code style="background:var(--surface-2);padding:2px 8px;border-radius:4px;font-size:12px">python main.py</code></li>
+      </ol>
+    </div>
+    <div class="section-title" style="margin-top:20px">API Health</div>
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-green"></div><div class="kpi-label">POST /api/mt5/trade</div><div class="kpi-val up" style="font-size:16px">Active</div><div class="kpi-sub">receives EA events</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-blue"></div><div class="kpi-label">GET /api/mt5/stats</div><div class="kpi-val" style="font-size:16px" id="conn-stats-status">—</div></div>
+      <div class="kpi-card"><div class="kpi-accent kpi-accent-yellow"></div><div class="kpi-label">GET /api/mt5/accounts</div><div class="kpi-val" style="font-size:16px" id="conn-accts-status">—</div></div>
+    </div>
+    <div class="section-title" style="margin-top:20px">Detected Accounts</div>
+    <div id="conn-account-list" class="section-card" style="padding:16px 20px;color:var(--text-3);font-size:13px">Loading…</div>
+  </div><!-- /page-connection -->
 
 </main>
 
@@ -660,314 +713,466 @@ tr:hover td { background: var(--surface-2); }
 </footer>
 
 <script>
-let eqChart = null, pnlChart = null, wrChart = null;
+// ── Page router ──────────────────────────────────────────────────────────────
+let currentPage = 'dashboard';
+const PAGE_TITLES = {
+  dashboard:  'Dashboard',
+  equity:     'Equity Curve',
+  daily:      'Daily P&L',
+  trades:     'Trade Log',
+  strategies: 'Strategies',
+  risk:       'Risk Monitor',
+  accounts:   'All Accounts',
+  connection: 'MT5 Connection',
+};
 
-// ── Load ──────────────────────────────────────────────────────────────────
+function navTo(page) {
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+  const el = document.getElementById('page-' + page);
+  if (el) el.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const navEl = document.querySelector('[data-page="' + page + '"]');
+  if (navEl) navEl.classList.add('active');
+  currentPage = page;
+  const title = document.getElementById('topbar-title');
+  if (title) title.textContent = PAGE_TITLES[page] || page;
+  load();
+}
+
+// ── State ────────────────────────────────────────────────────────────────────
+let eqChart=null, pnlChart=null, wrChart=null;
+let eq2Chart=null, daily2Chart=null, stratChart=null, stratCountChart=null;
+let currentAccount = 'all';
+let allAccounts = [];
+
+function onAccountChange() {
+  const sel = document.getElementById('account-select');
+  currentAccount = sel ? sel.value : 'all';
+  const label = document.getElementById('ch-account-label');
+  if (label) label.textContent = currentAccount==='all' ? 'All Accounts' : 'Account '+currentAccount;
+  load();
+}
+
+// ── Load ──────────────────────────────────────────────────────────────────────
 async function load() {
   try {
-    const [sRes, tRes] = await Promise.all([
-      fetch("/api/mt5/stats"),
-      fetch("/api/mt5/trades?limit=500"),
+    const acctParam = currentAccount !== 'all' ? '?account=' + encodeURIComponent(currentAccount) : '';
+    const [sRes, tRes, aRes] = await Promise.all([
+      fetch('/api/mt5/stats' + acctParam),
+      fetch('/api/mt5/trades?limit=500' + (currentAccount!=='all' ? '&account='+encodeURIComponent(currentAccount) : '')),
+      fetch('/api/mt5/accounts'),
     ]);
-    if (!sRes.ok || !tRes.ok) throw new Error("API error");
+    if (!sRes.ok || !tRes.ok || !aRes.ok) throw new Error('API error');
     const stats  = await sRes.json();
     const trades = await tRes.json();
+    allAccounts  = await aRes.json();
+    populateAccountSelector(allAccounts);
     renderKPIs(stats);
-    renderCharts(stats);
-    renderChallenge(stats);
+    renderChallenge(stats, 'ch-', 'challenge-status');
+    renderChallenge(stats, 'risk-ch-', 'risk-challenge-status');
+    renderStreak(trades, 'streak-row', 'streak-label');
+    renderStreak(trades, 'risk-streak-row', null, 40);
+    renderRisk(stats, trades);
     renderStrategies(stats.by_strategy || []);
     renderTradeTable(trades);
-    renderStreak(trades);
-    renderRisk(stats, trades);
+    if (currentPage === 'dashboard') renderDashboardCharts(stats);
+    if (currentPage === 'equity')    renderEquityPage(stats);
+    if (currentPage === 'daily')     renderDailyPage(stats);
+    if (currentPage === 'strategies') renderStrategyCharts(stats.by_strategy || []);
+    if (currentPage === 'accounts')  renderAccountsPage(allAccounts);
+    if (currentPage === 'connection') renderConnectionPage(allAccounts);
     setStatus(true);
   } catch(e) {
-    console.error("load error:", e);
+    console.error('load error:', e);
     setStatus(false);
   }
 }
 
-// ── KPIs ──────────────────────────────────────────────────────────────────
+// ── Account selector ──────────────────────────────────────────────────────────
+function populateAccountSelector(accounts) {
+  const sel = document.getElementById('account-select');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="all">All Accounts</option>';
+  accounts.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a.account;
+    opt.textContent = a.account + (a.broker ? ' (' + a.broker + ')' : '');
+    if (a.account === current) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+// ── KPIs ──────────────────────────────────────────────────────────────────────
 function renderKPIs(s) {
   const set = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
-  const fmt = n => n >= 0 ? `+$${n.toFixed(2)}` : `-$${Math.abs(n).toFixed(2)}`;
-
-  set("k-total", s.total_closed ?? "—");
-
-  const pnlEl = document.getElementById("k-pnl");
-  if (pnlEl) {
-    pnlEl.textContent  = s.total_profit != null ? fmt(s.total_profit) : "—";
-    pnlEl.className    = "kpi-val " + (s.total_profit >= 0 ? "up" : "dn");
-  }
-
-  set("k-wr", s.total_closed ? `${s.win_rate}%` : "—");
-  set("k-wl", `${s.win_count ?? "—"}W / ${s.loss_count ?? "—"}L`);
-  set("k-aw", s.avg_win  ? `+$${s.avg_win.toFixed(2)}`           : "—");
-  set("k-al", s.avg_loss ? `-$${Math.abs(s.avg_loss).toFixed(2)}` : "—");
-  set("k-rr", s.risk_reward ? `${s.risk_reward}x` : "—");
-
-  // Topbar win/loss count badge
-  const openCount = 0; // open trades shown via trade table
-  set("nav-open-count", s.total_closed ?? "—");
+  const fmt = n => n >= 0 ? '+$'+n.toFixed(2) : '-$'+Math.abs(n).toFixed(2);
+  set('k-total', s.total_closed ?? '—');
+  const pnlEl = document.getElementById('k-pnl');
+  if (pnlEl) { pnlEl.textContent = s.total_profit!=null ? fmt(s.total_profit) : '—'; pnlEl.className='kpi-val '+(s.total_profit>=0?'up':'dn'); }
+  set('k-wr', s.total_closed ? s.win_rate+'%' : '—');
+  set('k-wl', (s.win_count??'—')+'W / '+(s.loss_count??'—')+'L');
+  set('k-aw', s.avg_win  ? '+$'+s.avg_win.toFixed(2) : '—');
+  set('k-al', s.avg_loss ? '-$'+Math.abs(s.avg_loss).toFixed(2) : '—');
+  set('k-rr', s.risk_reward ? s.risk_reward+'x' : '—');
+  set('nav-open-count', s.total_closed ?? '—');
+  // Risk page KPIs
+  const fmt2 = n => n>=0 ? '+$'+n.toFixed(2) : '-$'+Math.abs(n).toFixed(2);
+  set('risk-daily-pnl', s.total_profit!=null ? fmt2(s.total_profit) : '—');
+  // Drawdown
+  const peak = s.equity_curve && s.equity_curve.length ? Math.max(0,...s.equity_curve.map(p=>p.value)) : 0;
+  const last  = s.equity_curve && s.equity_curve.length ? s.equity_curve[s.equity_curve.length-1].value : 0;
+  const dd    = peak > 0 ? peak - last : 0;
+  set('risk-dd', dd > 0 ? '-$'+dd.toFixed(2) : '$0.00');
 }
 
-// ── Charts ────────────────────────────────────────────────────────────────
-function renderCharts(s) {
-  // Equity Curve
+// ── Dashboard Charts ──────────────────────────────────────────────────────────
+function renderDashboardCharts(s) {
+  // Equity curve
   if (s.equity_curve && s.equity_curve.length > 0) {
-    if (eqChart) eqChart.destroy();
+    if (eqChart) { eqChart.destroy(); eqChart=null; }
     const vals   = [0, ...s.equity_curve.map(p => p.value)];
-    const labels = ["Start", ...s.equity_curve.map(p => (p.time || "").substring(0,10))];
-    const mn = Math.min(0, ...vals), mx = Math.max(0, ...vals);
-    const pad = Math.max((mx - mn) * 0.12, 20);
-    const last = vals[vals.length - 1];
-    document.getElementById("eq-meta").textContent =
-      last != null ? (last >= 0 ? `+$${last.toFixed(2)}` : `-$${Math.abs(last).toFixed(2)}`) : "—";
-    eqChart = new Chart(document.getElementById("eq-chart"), {
-      type: "line",
-      data: { labels, datasets: [{
-        label: "Equity", data: vals,
-        borderColor: "#4d79ff", backgroundColor: "rgba(77,121,255,0.07)",
-        borderWidth: 2, pointRadius: 3, fill: true, tension: 0.3,
-        pointBackgroundColor: "#4d79ff",
-      }]},
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false },
-          tooltip: { callbacks: { label: ctx => `$${ctx.parsed.y.toFixed(2)}` } }
-        },
-        scales: {
-          x: { ticks: { maxTicksLimit: 6, font:{size:10}, color:"#6b7394" }, grid:{color:"#1e2330"} },
-          y: { min: mn-pad, max: mx+pad,
-               ticks: { font:{size:10}, color:"#6b7394", callback: v => `$${v.toFixed(0)}` },
-               grid: { color:"#1e2330" } }
-        }
-      }
+    const labels = ['Start', ...s.equity_curve.map(p => (p.time||'').substring(0,10))];
+    const mn = Math.min(0,...vals), mx = Math.max(0,...vals);
+    const pad = Math.max((mx-mn)*0.12, 20);
+    const last = vals[vals.length-1];
+    const meta = document.getElementById('eq-meta');
+    if (meta) meta.textContent = last!=null ? (last>=0?'+$'+last.toFixed(2):'-$'+Math.abs(last).toFixed(2)) : '—';
+    eqChart = new Chart(document.getElementById('eq-chart'), {
+      type:'line', data:{ labels, datasets:[{ label:'Equity', data:vals,
+        borderColor:'#4d79ff', backgroundColor:'rgba(77,121,255,0.07)',
+        borderWidth:2, pointRadius:3, fill:true, tension:0.3 }]},
+      options:{ responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false} },
+        scales:{
+          x:{ticks:{maxTicksLimit:6,font:{size:10},color:'#6b7394'},grid:{color:'#1e2330'}},
+          y:{min:mn-pad,max:mx+pad,ticks:{font:{size:10},color:'#6b7394',callback:v=>'$'+v.toFixed(0)},grid:{color:'#1e2330'}}
+        }}
     });
   }
-
-  // Win/Loss Doughnut
-  const wins   = s.win_count   || 0;
-  const losses = s.loss_count  || 0;
-  const total  = wins + losses;
-  document.getElementById("wr-pct").textContent = total ? `${Math.round(wins/total*100)}%` : "—";
-  if (wrChart) wrChart.destroy();
-  wrChart = new Chart(document.getElementById("wr-chart"), {
-    type: "doughnut",
-    data: {
-      datasets: [{
-        data: total ? [wins, losses] : [1, 0],
-        backgroundColor: total ? ["rgba(0,214,143,0.8)","rgba(255,77,109,0.8)"] : ["#252a36","#252a36"],
-        borderColor: "transparent", borderWidth: 0,
-        hoverOffset: 4,
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: true,
-      cutout: "72%",
-      plugins: { legend: { display: false }, tooltip: { enabled: total > 0 } }
-    }
+  // Win/loss ring
+  const wins=s.win_count||0, losses=s.loss_count||0, total=wins+losses;
+  const wrPct = document.getElementById('wr-pct');
+  if (wrPct) wrPct.textContent = total ? Math.round(wins/total*100)+'%' : '—';
+  if (wrChart) { wrChart.destroy(); wrChart=null; }
+  wrChart = new Chart(document.getElementById('wr-chart'), {
+    type:'doughnut', data:{ datasets:[{
+      data: total ? [wins,losses] : [1,0],
+      backgroundColor: total ? ['rgba(0,214,143,0.8)','rgba(255,77,109,0.8)'] : ['#252a36','#252a36'],
+      borderColor:'transparent', borderWidth:0, hoverOffset:4 }]},
+    options:{ responsive:true, maintainAspectRatio:true, cutout:'72%',
+      plugins:{ legend:{display:false}, tooltip:{enabled:total>0} }}
   });
-
   // Daily PnL
   if (s.daily_pnl && s.daily_pnl.length > 0) {
-    if (pnlChart) pnlChart.destroy();
-    const vals   = s.daily_pnl.map(p => p.pnl);
-    const labels = s.daily_pnl.map(p => p.day);
-    const mn = Math.min(0,...vals), mx = Math.max(0,...vals);
-    const pad = Math.max((mx-mn)*0.18, 10);
-    const total_d = vals.reduce((a,b)=>a+b,0);
-    document.getElementById("pnl-meta").textContent = `${vals.length}d · ${total_d>=0?"+":"-"}$${Math.abs(total_d).toFixed(2)} total`;
-    pnlChart = new Chart(document.getElementById("pnl-chart"), {
-      type: "bar",
-      data: { labels, datasets: [{
-        label: "P&L", data: vals,
-        backgroundColor: vals.map(v => v>=0 ? "rgba(0,214,143,0.7)" : "rgba(255,77,109,0.7)"),
-        borderRadius: 4,
-      }]},
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { ticks: { maxTicksLimit:8, font:{size:10}, color:"#6b7394" }, grid:{display:false} },
-          y: { min: mn-pad, max: mx+pad,
-               ticks: { font:{size:10}, color:"#6b7394", callback: v=>`$${v.toFixed(0)}` },
-               grid: { color:"#1e2330" } }
-        }
-      }
+    if (pnlChart) { pnlChart.destroy(); pnlChart=null; }
+    const vals=s.daily_pnl.map(p=>p.pnl), labels=s.daily_pnl.map(p=>p.day);
+    const mn=Math.min(0,...vals), mx=Math.max(0,...vals);
+    const pad=Math.max((mx-mn)*0.18,10);
+    const tot=vals.reduce((a,b)=>a+b,0);
+    const pm = document.getElementById('pnl-meta');
+    if (pm) pm.textContent = vals.length+'d · '+(tot>=0?'+':'-')+'$'+Math.abs(tot).toFixed(2)+' total';
+    pnlChart = new Chart(document.getElementById('pnl-chart'), {
+      type:'bar', data:{ labels, datasets:[{
+        label:'P&L', data:vals,
+        backgroundColor:vals.map(v=>v>=0?'rgba(0,214,143,0.7)':'rgba(255,77,109,0.7)'),
+        borderRadius:4 }]},
+      options:{ responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false} },
+        scales:{
+          x:{ticks:{maxTicksLimit:8,font:{size:10},color:'#6b7394'},grid:{display:false}},
+          y:{min:mn-pad,max:mx+pad,ticks:{font:{size:10},color:'#6b7394',callback:v=>'$'+v.toFixed(0)},grid:{color:'#1e2330'}}
+        }}
     });
   }
 }
 
-// ── Challenge Monitor ─────────────────────────────────────────────────────
-function renderChallenge(s) {
-  const ACCOUNT_SIZE = 10000;
-  const PROFIT_TARGET = ACCOUNT_SIZE * 0.08;
-  const MAX_DD = ACCOUNT_SIZE * 0.10;
-  const profit = s.total_profit || 0;
-  const loss   = Math.min(profit, 0); // negative profit = drawdown
-
-  const profitPct = Math.max(0, Math.min(100, (profit / PROFIT_TARGET) * 100));
-  const ddPct     = Math.max(0, Math.min(100, (Math.abs(loss) / MAX_DD) * 100));
-
-  document.getElementById("ch-profit-val").textContent = `$${profit.toFixed(2)} / $${PROFIT_TARGET.toFixed(2)}`;
-  document.getElementById("ch-profit-pct").textContent = `${profitPct.toFixed(1)}%`;
-  document.getElementById("ch-profit-bar").style.width  = `${profitPct}%`;
-
-  document.getElementById("ch-dd-val").textContent = `$${Math.abs(loss).toFixed(2)} / $${MAX_DD.toFixed(2)}`;
-  document.getElementById("ch-dd-pct").textContent  = `${ddPct.toFixed(1)}%`;
-  document.getElementById("ch-dd-bar").style.width   = `${ddPct}%`;
-
-  const statusEl = document.getElementById("challenge-status");
-  if (ddPct >= 100) { statusEl.textContent = "Breached"; statusEl.style.background="var(--red-bg)"; statusEl.style.color="var(--red)"; }
-  else if (ddPct >= 70) { statusEl.textContent = "At Risk"; statusEl.style.background="var(--yellow-bg)"; statusEl.style.color="var(--yellow)"; }
-  else if (profitPct >= 100) { statusEl.textContent = "Passed ✓"; statusEl.style.background="var(--green-bg)"; statusEl.style.color="var(--green)"; }
-  else { statusEl.textContent = "Active"; statusEl.style.background="var(--blue-bg)"; statusEl.style.color="var(--blue)"; }
-}
-
-// ── Strategy rows ─────────────────────────────────────────────────────────
-function renderStrategies(rows) {
-  const el = document.getElementById("strat-rows");
-  if (!rows.length) {
-    el.innerHTML = '<div class="strat-row"><div style="font-size:12px;color:var(--text-4);padding:10px 0">No data yet</div></div>';
-    return;
-  }
-  const icons = { "DHLAO":"🌅", "3MACD":"⚡", "BBRSI":"🎯" };
-  const maxAbs = Math.max(...rows.map(r => Math.abs(r.profit || 0)), 1);
-  el.innerHTML = rows.map(r => {
-    const p = r.profit ?? 0;
-    const cls = p >= 0 ? "pnl-pos" : "pnl-neg";
-    const barColor = p >= 0 ? "var(--green)" : "var(--red)";
-    const barPct = Math.round(Math.abs(p) / maxAbs * 100);
-    const icon = icons[r.strategy] || "📌";
-    return `<div class="strat-row">
-      <div class="strat-icon">${icon}</div>
-      <div style="min-width:80px">
-        <div class="strat-name">${r.strategy || "—"}</div>
-        <div class="strat-trades">${r.trades} trade${r.trades!==1?"s":""}</div>
-      </div>
-      <div class="strat-bar-wrap">
-        <div class="strat-bar-bg">
-          <div class="strat-bar-fill" style="width:${barPct}%;background:${barColor}"></div>
-        </div>
-      </div>
-      <div class="strat-pnl ${cls}">${p>=0?"+":"-"}$${Math.abs(p).toFixed(2)}</div>
-    </div>`;
-  }).join("");
-}
-
-// ── Streak ────────────────────────────────────────────────────────────────
-function renderStreak(trades) {
-  const closed = trades.filter(t => t.event === "close").reverse().slice(0, 20);
-  const el = document.getElementById("streak-row");
-  if (!closed.length) return;
-  el.innerHTML = closed.map(t => {
-    const p = parseFloat(t.profit || 0);
-    const cls = p > 0 ? "s-win" : p < 0 ? "s-loss" : "s-none";
-    return `<div class="streak-dot ${cls}" title="${p>=0?"+":"-"}$${Math.abs(p).toFixed(2)}"></div>`;
-  }).join("") + '<span class="streak-label">(newest →)</span>';
-
-  // Compute current streak
-  let streak = 0, dir = null;
-  for (const t of closed) {
-    const p = parseFloat(t.profit || 0);
-    const d = p > 0 ? "W" : "L";
-    if (dir === null) dir = d;
-    if (d === dir) streak++; else break;
-  }
-  document.getElementById("streak-label").textContent =
-    dir ? `${streak} ${dir === "W" ? "wins" : "losses"} in a row` : "—";
-}
-
-// ── Risk ──────────────────────────────────────────────────────────────────
-function renderRisk(stats, trades) {
-  const openTrades = trades.filter(t => t.event === "open").length;
-  const dailyPnl   = stats.total_profit || 0;
-  const maxDailyLoss = 500;
-
-  const set = (id,v) => { const el = document.getElementById(id); if(el) el.textContent=v; };
-  const fmt = n => n>=0 ? `+$${n.toFixed(2)}` : `-$${Math.abs(n).toFixed(2)}`;
-
-  set("r-daily-pnl", fmt(dailyPnl));
-  set("r-open", `${openTrades} open`);
-
-  const dailyPct = Math.min(100, Math.abs(dailyPnl) / maxDailyLoss * 100);
-  const openPct  = Math.min(100, openTrades / 10 * 100);
-
-  const dailyBar = document.getElementById("r-daily-bar");
-  if (dailyBar) {
-    dailyBar.style.width = `${dailyPct}%`;
-    dailyBar.className = "risk-bar " + (dailyPct < 40 ? "risk-safe" : dailyPct < 75 ? "risk-warn" : "risk-danger");
-  }
-  const openBar = document.getElementById("r-open-bar");
-  if (openBar) {
-    openBar.style.width = `${openPct}%`;
-    openBar.className = "risk-bar " + (openPct < 50 ? "risk-safe" : openPct < 80 ? "risk-warn" : "risk-danger");
-  }
-}
-
-// ── Trade Table ───────────────────────────────────────────────────────────
-function renderTradeTable(trades) {
-  const tbody = document.getElementById("trade-body");
-  if (!tbody) return;
-  const countEl = document.getElementById("trade-count");
-  if (countEl) countEl.textContent = `${trades.length} records`;
-  if (!trades || !trades.length) {
-    tbody.innerHTML = '<tr><td colspan="12" class="empty-row">No trades yet — EA is listening…</td></tr>';
-    return;
-  }
-  tbody.innerHTML = trades.map(t => {
-    const pnl  = parseFloat(t.profit || 0);
-    const pnlHtml = pnl !== 0
-      ? `<span class="${pnl>0?"pnl-pos":"pnl-neg"}">${pnl>0?"+":"-"}$${Math.abs(pnl).toFixed(2)}</span>`
-      : "—";
-    const rawTime = t.event==="open" ? (t.open_time||"") : (t.close_time||"");
-    const time = rawTime ? rawTime.substring(0,19).replace("T"," ")
-                         : (t.received_at||"").substring(0,19).replace("T"," ");
-    const side = (t.side||"").toLowerCase();
-    const sideBadge = side==="buy"
-      ? `<span class="badge badge-buy">BUY</span>`
-      : side==="sell" ? `<span class="badge badge-sell">SELL</span>`
-      : `<span style="color:var(--text-3);font-size:11px">${t.side||"—"}</span>`;
-    const evBadge = t.event==="open"
-      ? `<span class="badge badge-open">OPEN</span>`
-      : `<span class="badge badge-close">CLOSE</span>`;
-    return `<tr>
-      <td>${t.ticket}</td>
-      <td>${time}</td>
-      <td><strong>${t.symbol}</strong></td>
-      <td>${evBadge}</td>
-      <td>${sideBadge}</td>
-      <td>${parseFloat(t.lots||0).toFixed(2)}</td>
-      <td>${t.open_price >0 ? parseFloat(t.open_price).toFixed(5)  : "—"}</td>
-      <td>${t.close_price>0 ? parseFloat(t.close_price).toFixed(5) : "—"}</td>
-      <td>${t.sl>0 ? parseFloat(t.sl).toFixed(5) : "—"}</td>
-      <td>${t.tp>0 ? parseFloat(t.tp).toFixed(5) : "—"}</td>
-      <td>${pnlHtml}</td>
-      <td>${t.strategy || "—"}</td>
-    </tr>`;
-  }).join("");
-}
-
-// ── Status ────────────────────────────────────────────────────────────────
-function setStatus(ok) {
-  ["sidebar-dot","sb-api"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.className = el.className.replace(" live","") + (ok ? " live" : "");
+// ── Equity Page ───────────────────────────────────────────────────────────────
+function renderEquityPage(s) {
+  if (!s.equity_curve || !s.equity_curve.length) return;
+  if (eq2Chart) { eq2Chart.destroy(); eq2Chart=null; }
+  const vals=[0,...s.equity_curve.map(p=>p.value)];
+  const labels=['Start',...s.equity_curve.map(p=>(p.time||'').substring(0,10))];
+  const mn=Math.min(0,...vals), mx=Math.max(0,...vals);
+  const pad=Math.max((mx-mn)*0.12,20);
+  eq2Chart = new Chart(document.getElementById('eq2-chart'), {
+    type:'line', data:{labels, datasets:[{label:'Equity',data:vals,
+      borderColor:'#4d79ff',backgroundColor:'rgba(77,121,255,0.07)',
+      borderWidth:2,pointRadius:4,fill:true,tension:0.3}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{maxTicksLimit:10,font:{size:11},color:'#6b7394'},grid:{color:'#1e2330'}},
+        y:{min:mn-pad,max:mx+pad,ticks:{font:{size:11},color:'#6b7394',callback:v=>'$'+v.toFixed(0)},grid:{color:'#1e2330'}}
+      }}
   });
-  const lbl = document.getElementById("sidebar-label");
-  if (lbl) lbl.textContent = ok ? "Live" : "Error";
-  const apiTxt = document.getElementById("sb-api-txt");
-  if (apiTxt) apiTxt.textContent = ok ? "API ✓" : "API ✗";
-  const updated = document.getElementById("last-updated");
-  if (updated) updated.textContent = ok ? `Updated ${new Date().toLocaleTimeString()}` : "Error loading data";
+  const last=vals[vals.length-1];
+  const peak=Math.max(0,...vals);
+  const dd=peak-last;
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  const meta=document.getElementById('eq2-meta');
+  if(meta) meta.textContent=(last>=0?'+':'-')+'$'+Math.abs(last).toFixed(2)+' net';
+  set('eq-peak','$'+peak.toFixed(2));
+  set('eq-dd',dd>0?'-$'+dd.toFixed(2):'$0.00');
+  set('eq-net',(last>=0?'+':'-')+'$'+Math.abs(last).toFixed(2));
+  set('eq-trades',s.total_closed??'—');
 }
 
-function tickClock() {
-  const el = document.getElementById("sb-time");
-  if (el) el.textContent = new Date().toUTCString().slice(0,25);
+// ── Daily Page ────────────────────────────────────────────────────────────────
+function renderDailyPage(s) {
+  if (!s.daily_pnl || !s.daily_pnl.length) return;
+  if (daily2Chart) { daily2Chart.destroy(); daily2Chart=null; }
+  const vals=s.daily_pnl.map(p=>p.pnl), labels=s.daily_pnl.map(p=>p.day);
+  const mn=Math.min(0,...vals), mx=Math.max(0,...vals);
+  const pad=Math.max((mx-mn)*0.18,10);
+  const tot=vals.reduce((a,b)=>a+b,0);
+  const meta=document.getElementById('daily2-meta');
+  if(meta) meta.textContent=vals.length+' days · total: '+(tot>=0?'+':'-')+'$'+Math.abs(tot).toFixed(2);
+  daily2Chart = new Chart(document.getElementById('daily2-chart'), {
+    type:'bar', data:{labels, datasets:[{label:'P&L',data:vals,
+      backgroundColor:vals.map(v=>v>=0?'rgba(0,214,143,0.7)':'rgba(255,77,109,0.7)'),
+      borderRadius:6}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{font:{size:11},color:'#6b7394'},grid:{display:false}},
+        y:{min:mn-pad,max:mx+pad,ticks:{font:{size:11},color:'#6b7394',callback:v=>'$'+v.toFixed(0)},grid:{color:'#1e2330'}}
+      }}
+  });
+  // Table
+  const tbody=document.getElementById('daily-table-body');
+  if(tbody) {
+    // Fetch per-day trade counts
+    tbody.innerHTML = s.daily_pnl.map(d => {
+      const cls = d.pnl>=0 ? 'pnl-pos' : 'pnl-neg';
+      const result = d.pnl>=0 ? '<span class="badge badge-buy">WIN</span>' : '<span class="badge badge-sell">LOSS</span>';
+      return '<tr><td>'+d.day+'</td><td class="'+cls+'">'+(d.pnl>=0?'+':'-')+'$'+Math.abs(d.pnl).toFixed(2)+'</td><td>—</td><td>'+result+'</td></tr>';
+    }).join('');
+  }
 }
 
-// ── Boot ──────────────────────────────────────────────────────────────────
+// ── Strategy Charts ───────────────────────────────────────────────────────────
+function renderStrategyCharts(rows) {
+  if (!rows.length) return;
+  const labels = rows.map(r => r.strategy || 'Unknown');
+  const pnls   = rows.map(r => r.profit || 0);
+  const counts = rows.map(r => r.trades || 0);
+  const colors = pnls.map(v => v>=0 ? 'rgba(0,214,143,0.75)' : 'rgba(255,77,109,0.75)');
+  if (stratChart) { stratChart.destroy(); stratChart=null; }
+  if (stratCountChart) { stratCountChart.destroy(); stratCountChart=null; }
+  stratChart = new Chart(document.getElementById('strat-chart'), {
+    type:'bar', data:{labels, datasets:[{label:'P&L',data:pnls,backgroundColor:colors,borderRadius:5}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#6b7394',font:{size:11}},grid:{display:false}},
+               y:{ticks:{color:'#6b7394',font:{size:11},callback:v=>'$'+v.toFixed(0)},grid:{color:'#1e2330'}}}}
+  });
+  stratCountChart = new Chart(document.getElementById('strat-count-chart'), {
+    type:'bar', data:{labels, datasets:[{label:'Trades',data:counts,backgroundColor:'rgba(77,121,255,0.7)',borderRadius:5}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#6b7394',font:{size:11}},grid:{display:false}},
+               y:{ticks:{color:'#6b7394',font:{size:11}},grid:{color:'#1e2330'}}}}
+  });
+}
+
+// ── Challenge Monitor ─────────────────────────────────────────────────────────
+function renderChallenge(s, prefix, statusId) {
+  const ACCOUNT_SIZE=10000, PROFIT_TARGET=800, MAX_DD=1000;
+  const profit=s.total_profit||0;
+  const loss=Math.min(profit,0);
+  const profitPct=Math.max(0,Math.min(100,(profit/PROFIT_TARGET)*100));
+  const ddPct=Math.max(0,Math.min(100,(Math.abs(loss)/MAX_DD)*100));
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  set(prefix+'profit-val','$'+profit.toFixed(2)+' / $'+PROFIT_TARGET.toFixed(2));
+  set(prefix+'profit-pct',profitPct.toFixed(1)+'%');
+  const pb=document.getElementById(prefix+'profit-bar');
+  if(pb)pb.style.width=profitPct+'%';
+  set(prefix+'dd-val','$'+Math.abs(loss).toFixed(2)+' / $'+MAX_DD.toFixed(2));
+  set(prefix+'dd-pct',ddPct.toFixed(1)+'%');
+  const db=document.getElementById(prefix+'dd-bar');
+  if(db)db.style.width=ddPct+'%';
+  const statusEl=document.getElementById(statusId);
+  if(statusEl){
+    if(ddPct>=100){statusEl.textContent='Breached';statusEl.style.background='var(--red-bg)';statusEl.style.color='var(--red)';}
+    else if(ddPct>=70){statusEl.textContent='At Risk';statusEl.style.background='var(--yellow-bg)';statusEl.style.color='var(--yellow)';}
+    else if(profitPct>=100){statusEl.textContent='Passed ✓';statusEl.style.background='var(--green-bg)';statusEl.style.color='var(--green)';}
+    else{statusEl.textContent='Active';statusEl.style.background='var(--blue-bg)';statusEl.style.color='var(--blue)';}
+  }
+}
+
+// ── Strategy rows ─────────────────────────────────────────────────────────────
+function renderStrategies(rows) {
+  const el=document.getElementById('strat-rows');
+  if(!el)return;
+  if(!rows.length){el.innerHTML='<div class="strat-row"><div style="font-size:12px;color:var(--text-4);padding:10px 0">No data yet</div></div>';return;}
+  const icons={'DHLAO':'🌅','3MACD':'⚡','BBRSI':'🎯'};
+  const maxAbs=Math.max(...rows.map(r=>Math.abs(r.profit||0)),1);
+  el.innerHTML=rows.map(r=>{
+    const p=r.profit??0;
+    const cls=p>=0?'pnl-pos':'pnl-neg';
+    const barColor=p>=0?'var(--green)':'var(--red)';
+    const barPct=Math.round(Math.abs(p)/maxAbs*100);
+    const icon=icons[r.strategy]||'📌';
+    return '<div class="strat-row"><div class="strat-icon">'+icon+'</div><div style="min-width:80px"><div class="strat-name">'+(r.strategy||'—')+'</div><div class="strat-trades">'+r.trades+' trade'+(r.trades!==1?'s':'')+'</div></div><div class="strat-bar-wrap"><div class="strat-bar-bg"><div class="strat-bar-fill" style="width:'+barPct+'%;background:'+barColor+'"></div></div></div><div class="strat-pnl '+cls+'">'+(p>=0?'+':'-')+'$'+Math.abs(p).toFixed(2)+'</div></div>';
+  }).join('');
+}
+
+// ── Streak ────────────────────────────────────────────────────────────────────
+function renderStreak(trades, rowId, labelId, limit) {
+  limit = limit || 20;
+  const closed=trades.filter(t=>t.event==='close').reverse().slice(0,limit);
+  const el=document.getElementById(rowId);
+  if(!el||!closed.length)return;
+  el.innerHTML=closed.map(t=>{
+    const p=parseFloat(t.profit||0);
+    const cls=p>0?'s-win':p<0?'s-loss':'s-none';
+    return '<div class="streak-dot '+cls+'" title="'+(p>=0?'+':'-')+'$'+Math.abs(p).toFixed(2)+'"></div>';
+  }).join('')+'<span class="streak-label">(newest →)</span>';
+  if(labelId){
+    let streak=0,dir=null;
+    for(const t of closed){const p=parseFloat(t.profit||0);const d=p>0?'W':'L';if(dir===null)dir=d;if(d===dir)streak++;else break;}
+    const lbl=document.getElementById(labelId);
+    if(lbl)lbl.textContent=dir?streak+' '+(dir==='W'?'wins':'losses')+' in a row':'—';
+    const rsk=document.getElementById('risk-streak');
+    if(rsk)rsk.textContent=dir?streak+' '+(dir==='W'?'W':'L'):'—';
+  }
+}
+
+// ── Risk ──────────────────────────────────────────────────────────────────────
+function renderRisk(stats,trades){
+  const openTrades=trades.filter(t=>t.event==='open').length;
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  const fmt=n=>n>=0?'+$'+n.toFixed(2):'-$'+Math.abs(n).toFixed(2);
+  set('r-daily-pnl',fmt(stats.total_profit||0));
+  set('r-open',openTrades+' open');
+  set('risk-open',openTrades+' open');
+  const dailyPct=Math.min(100,Math.abs(stats.total_profit||0)/500*100);
+  const openPct=Math.min(100,openTrades/10*100);
+  const db=document.getElementById('r-daily-bar');
+  if(db){db.style.width=dailyPct+'%';db.className='risk-bar '+(dailyPct<40?'risk-safe':dailyPct<75?'risk-warn':'risk-danger');}
+  const ob=document.getElementById('r-open-bar');
+  if(ob){ob.style.width=openPct+'%';ob.className='risk-bar '+(openPct<50?'risk-safe':openPct<80?'risk-warn':'risk-danger');}
+}
+
+// ── Trade Table ───────────────────────────────────────────────────────────────
+function renderTradeTable(trades) {
+  const tbody=document.getElementById('trade-body');
+  if(!tbody)return;
+  const countEl=document.getElementById('trade-count');
+  if(countEl)countEl.textContent=trades.length+' records';
+  if(!trades||!trades.length){tbody.innerHTML='<tr><td colspan="13" class="empty-row">No trades yet — EA is listening…</td></tr>';return;}
+  tbody.innerHTML=trades.map(t=>{
+    const pnl=parseFloat(t.profit||0);
+    const pnlHtml=pnl!==0?'<span class="'+(pnl>0?'pnl-pos':'pnl-neg')+'">'+(pnl>0?'+':'-')+'$'+Math.abs(pnl).toFixed(2)+'</span>':'—';
+    const rawTime=t.event==='open'?(t.open_time||''):(t.close_time||'');
+    const time=rawTime?rawTime.substring(0,19).replace('T',' '):(t.received_at||'').substring(0,19).replace('T',' ');
+    const side=(t.side||'').toLowerCase();
+    const sideBadge=side==='buy'?'<span class="badge badge-buy">BUY</span>':side==='sell'?'<span class="badge badge-sell">SELL</span>':'<span style="color:var(--text-3);font-size:11px">'+(t.side||'—')+'</span>';
+    const evBadge=t.event==='open'?'<span class="badge badge-open">OPEN</span>':'<span class="badge badge-close">CLOSE</span>';
+    const acctBadge='<span style="font-size:10px;background:var(--surface-2);border:1px solid var(--border);padding:2px 6px;border-radius:4px;color:var(--text-2)">'+(t.account||'—')+'</span>';
+    return '<tr><td>'+t.ticket+'</td><td>'+acctBadge+'</td><td>'+time+'</td><td><strong>'+t.symbol+'</strong></td><td>'+evBadge+'</td><td>'+sideBadge+'</td><td>'+parseFloat(t.lots||0).toFixed(2)+'</td><td>'+(t.open_price>0?parseFloat(t.open_price).toFixed(5):'—')+'</td><td>'+(t.close_price>0?parseFloat(t.close_price).toFixed(5):'—')+'</td><td>'+(t.sl>0?parseFloat(t.sl).toFixed(5):'—')+'</td><td>'+(t.tp>0?parseFloat(t.tp).toFixed(5):'—')+'</td><td>'+pnlHtml+'</td><td>'+(t.strategy||'—')+'</td></tr>';
+  }).join('');
+}
+
+// ── Accounts Page ─────────────────────────────────────────────────────────────
+function renderAccountsPage(accounts) {
+  const cards=document.getElementById('account-cards');
+  const tables=document.getElementById('account-tables');
+  if(!cards||!tables)return;
+  if(!accounts.length){
+    cards.innerHTML='<div class="kpi-card"><div class="kpi-label">No accounts yet</div><div class="kpi-val">—</div><div class="kpi-sub">EA not connected</div></div>';
+    tables.innerHTML='';
+    return;
+  }
+  const accents=['kpi-accent-blue','kpi-accent-green','kpi-accent-yellow','kpi-accent-purple','kpi-accent-red'];
+  cards.innerHTML=accounts.map((a,i)=>{
+    const p=a.total_profit||0;
+    const cls=p>=0?'up':'dn';
+    const accent=accents[i%accents.length];
+    return '<div class="kpi-card" style="cursor:pointer" onclick="navToAccount(\''+a.account+'\')">'
+      +'<div class="kpi-accent '+accent+'"></div>'
+      +'<div class="kpi-label">'+a.account+'</div>'
+      +'<div class="kpi-val '+cls+'">'+(p>=0?'+':'-')+'$'+Math.abs(p).toFixed(2)+'</div>'
+      +'<div class="kpi-sub">'+(a.broker||'—')+' · '+a.closed_trades+' closed</div>'
+      +'</div>';
+  }).join('');
+  // Per-account mini trade tables
+  tables.innerHTML=accounts.map((a,i)=>`
+    <div class="acct-card">
+      <div class="acct-card-header">
+        <div>
+          <div class="acct-card-title">Account ${a.account}</div>
+          <div class="acct-card-broker">${a.broker||'Unknown broker'} · ${a.closed_trades} closed · ${a.total_trades} total</div>
+        </div>
+        <div style="font-size:20px;font-weight:800;${(a.total_profit||0)>=0?'color:var(--green)':'color:var(--red)'}">${(a.total_profit||0)>=0?'+':'-'}$${Math.abs(a.total_profit||0).toFixed(2)}</div>
+      </div>
+      <div id="acct-trades-${a.account}" style="font-size:12px;color:var(--text-3)">Loading trades…</div>
+    </div>
+  `).join('');
+  // Load each account's trades
+  accounts.forEach(a => fetchAccountTrades(a.account));
+}
+
+async function fetchAccountTrades(account) {
+  try {
+    const res=await fetch('/api/mt5/trades?limit=20&account='+encodeURIComponent(account));
+    const trades=await res.json();
+    const el=document.getElementById('acct-trades-'+account);
+    if(!el)return;
+    if(!trades.length){el.innerHTML='<span style="color:var(--text-4)">No trades for this account</span>';return;}
+    el.innerHTML='<div class="tbl-scroll"><table><thead><tr><th>#</th><th>Time</th><th>Symbol</th><th>Event</th><th>Side</th><th>Lots</th><th>P&L</th><th>Strategy</th></tr></thead><tbody>'
+      +trades.slice(0,10).map(t=>{
+        const pnl=parseFloat(t.profit||0);
+        const pnlHtml=pnl!==0?'<span class="'+(pnl>0?'pnl-pos':'pnl-neg')+'">'+(pnl>0?'+':'-')+'$'+Math.abs(pnl).toFixed(2)+'</span>':'—';
+        const time=(t.close_time||t.open_time||t.received_at||'').substring(0,19).replace('T',' ');
+        const side=(t.side||'').toLowerCase();
+        const sb=side==='buy'?'<span class="badge badge-buy">BUY</span>':side==='sell'?'<span class="badge badge-sell">SELL</span>':'—';
+        const eb=t.event==='open'?'<span class="badge badge-open">OPEN</span>':'<span class="badge badge-close">CLOSE</span>';
+        return '<tr><td>'+t.ticket+'</td><td>'+time+'</td><td><strong>'+t.symbol+'</strong></td><td>'+eb+'</td><td>'+sb+'</td><td>'+parseFloat(t.lots||0).toFixed(2)+'</td><td>'+pnlHtml+'</td><td>'+(t.strategy||'—')+'</td></tr>';
+      }).join('')
+      +'</tbody></table></div>'
+      +(trades.length>10?'<div style="padding:6px 0;font-size:11px;color:var(--text-3)">Showing 10 of '+trades.length+' trades — <a href="#" onclick="navToAccount(\''+account+'\');return false" style="color:var(--blue)">view all</a></div>':'');
+  } catch(e) { console.error('fetchAccountTrades',e); }
+}
+
+function navToAccount(account) {
+  const sel=document.getElementById('account-select');
+  if(sel){sel.value=account;onAccountChange();}
+  navTo('trades');
+}
+
+// ── Connection Page ───────────────────────────────────────────────────────────
+function renderConnectionPage(accounts) {
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  set('conn-stats-status', 'OK ✓');
+  set('conn-accts-status', accounts.length + ' found');
+  const el=document.getElementById('conn-account-list');
+  if(!el)return;
+  if(!accounts.length){el.innerHTML='<span style="color:var(--text-4)">No accounts have sent data yet. Attach GalacticBridge.mq5 to a chart in MT5 to start.</span>';return;}
+  el.innerHTML=accounts.map(a=>
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border-light)">'
+    +'<div><div style="font-weight:600;font-size:13px">'+a.account+'</div><div style="font-size:11px;color:var(--text-3)">'+a.broker+'</div></div>'
+    +'<div style="text-align:right"><div style="font-size:13px;font-weight:700;'+(a.total_profit>=0?'color:var(--green)':'color:var(--red)')+'">'+(a.total_profit>=0?'+':'-')+'$'+Math.abs(a.total_profit).toFixed(2)+'</div>'
+    +'<div style="font-size:10px;color:var(--text-3)">Last: '+(a.last_seen||'—').substring(0,19)+'</div></div>'
+    +'</div>'
+  ).join('');
+}
+
+// ── Status ────────────────────────────────────────────────────────────────────
+function setStatus(ok) {
+  ['sidebar-dot','sb-api'].forEach(id=>{const el=document.getElementById(id);if(el){el.className=el.className.replace(' live','');if(ok)el.className+=' live';}});
+  const lbl=document.getElementById('sidebar-label');
+  if(lbl)lbl.textContent=ok?'Live':'Error';
+  const apiTxt=document.getElementById('sb-api-txt');
+  if(apiTxt)apiTxt.textContent=ok?'API ✓':'API ✗';
+  const updated=document.getElementById('last-updated');
+  if(updated)updated.textContent=ok?'Updated '+new Date().toLocaleTimeString():'Error loading data';
+}
+
+function tickClock(){const el=document.getElementById('sb-time');if(el)el.textContent=new Date().toUTCString().slice(0,25);}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
 load();
 setInterval(load, 10000);
 setInterval(tickClock, 1000);
