@@ -108,6 +108,7 @@ class TradingAgentsGraph:
         self.conditional_logic = ConditionalLogic(
             max_debate_rounds=self.config["max_debate_rounds"],
             max_risk_discuss_rounds=self.config["max_risk_discuss_rounds"],
+            enable_fact_checker=self.config.get("enable_fact_checker", False),
         )
         self.graph_setup = GraphSetup(
             self.quick_thinking_llm,

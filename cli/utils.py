@@ -1,5 +1,6 @@
 import questionary
 from typing import List, Optional, Tuple, Dict
+import subprocess
 
 from rich.console import Console
 
@@ -15,6 +16,57 @@ ANALYST_ORDER = [
     ("News Analyst", AnalystType.NEWS),
     ("Fundamentals Analyst", AnalystType.FUNDAMENTALS),
 ]
+
+
+def _parse_ollama_list_output(output: str) -> List[str]:
+    """Parse `ollama list` table output into model names."""
+    models: List[str] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        upper = line.upper()
+        if upper.startswith("NAME") and "ID" in upper:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        name = parts[0]
+        if name:
+            models.append(name)
+    # Keep first occurrence order, remove duplicates
+    deduped = list(dict.fromkeys(models))
+    return deduped
+
+
+def get_local_ollama_models() -> List[str]:
+    """Return locally available Ollama model names."""
+    try:
+        proc = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except FileNotFoundError:
+        console.print(
+            "\n[red]Ollama CLI not found. Install Ollama or choose another provider.[/red]"
+        )
+        exit(1)
+    except subprocess.CalledProcessError as exc:
+        error_text = (exc.stderr or exc.stdout or "").strip()
+        console.print(
+            f"\n[red]Failed to query Ollama models:[/red] {error_text or 'unknown error'}"
+        )
+        exit(1)
+
+    models = _parse_ollama_list_output(proc.stdout)
+    if not models:
+        console.print(
+            "\n[red]No local Ollama models found. Pull one first (e.g. `ollama pull qwen3:latest`).[/red]"
+        )
+        exit(1)
+    return models
 
 
 def get_ticker() -> str:
@@ -38,8 +90,18 @@ def get_ticker() -> str:
 
 
 def normalize_ticker_symbol(ticker: str) -> str:
-    """Normalize ticker input while preserving exchange suffixes."""
-    return ticker.strip().upper()
+    """Normalize ticker input while preserving exchange suffixes.
+
+    Special handling:
+    - Korean Yahoo symbols (e.g. 005930.KS, 035720.KQ) are converted to
+      Alpha Vantage-style `KRX:XXXXXX` for compatibility with some data APIs.
+    """
+    symbol = ticker.strip().upper()
+    if symbol.endswith(".KS") or symbol.endswith(".KQ"):
+        code = symbol.split(".")[0]
+        if code:
+            return f"KRX:{code}"
+    return symbol
 
 
 def get_analysis_date() -> str:
@@ -166,12 +228,14 @@ def select_shallow_thinking_agent(provider) -> str:
             ("NVIDIA Nemotron 3 Nano 30B (free)", "nvidia/nemotron-3-nano-30b-a3b:free"),
             ("Z.AI GLM 4.5 Air (free)", "z-ai/glm-4.5-air:free"),
         ],
-        "ollama": [
-            ("Qwen3:latest (8B, local)", "qwen3:latest"),
-            ("GPT-OSS:latest (20B, local)", "gpt-oss:latest"),
-            ("GLM-4.7-Flash:latest (30B, local)", "glm-4.7-flash:latest"),
-        ],
+        "ollama": [],
     }
+
+    if provider.lower() == "ollama":
+        local_models = get_local_ollama_models()
+        SHALLOW_AGENT_OPTIONS["ollama"] = [
+            (f"{model} (local)", model) for model in local_models
+        ]
 
     choice = questionary.select(
         "Select Your [Quick-Thinking LLM Engine]:",
@@ -233,12 +297,14 @@ def select_deep_thinking_agent(provider) -> str:
             ("Z.AI GLM 4.5 Air (free)", "z-ai/glm-4.5-air:free"),
             ("NVIDIA Nemotron 3 Nano 30B (free)", "nvidia/nemotron-3-nano-30b-a3b:free"),
         ],
-        "ollama": [
-            ("GLM-4.7-Flash:latest (30B, local)", "glm-4.7-flash:latest"),
-            ("GPT-OSS:latest (20B, local)", "gpt-oss:latest"),
-            ("Qwen3:latest (8B, local)", "qwen3:latest"),
-        ],
+        "ollama": [],
     }
+
+    if provider.lower() == "ollama":
+        local_models = get_local_ollama_models()
+        DEEP_AGENT_OPTIONS["ollama"] = [
+            (f"{model} (local)", model) for model in local_models
+        ]
 
     choice = questionary.select(
         "Select Your [Deep-Thinking LLM Engine]:",

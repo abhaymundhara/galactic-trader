@@ -7,6 +7,9 @@ no token limits, works offline with any LLM provider.
 from rank_bm25 import BM25Okapi
 from typing import List, Tuple
 import re
+import os
+import json
+import glob
 
 
 class FinancialSituationMemory:
@@ -20,9 +23,45 @@ class FinancialSituationMemory:
             config: Configuration dict (kept for API compatibility, not used for BM25)
         """
         self.name = name
+        self.config = config or {}
         self.documents: List[str] = []
         self.recommendations: List[str] = []
         self.bm25 = None
+        self.persist_path = self._resolve_persist_path()
+        self._load_from_disk()
+
+    def _resolve_persist_path(self) -> str:
+        memory_root = self.config.get("memory_store_dir")
+        if not memory_root:
+            project_dir = self.config.get("project_dir", ".")
+            memory_root = os.path.join(project_dir, "memory_store")
+        os.makedirs(memory_root, exist_ok=True)
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", self.name)
+        return os.path.join(memory_root, f"{safe_name}.json")
+
+    def _save_to_disk(self):
+        payload = {
+            "name": self.name,
+            "documents": self.documents,
+            "recommendations": self.recommendations,
+        }
+        with open(self.persist_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    def _load_from_disk(self):
+        if not os.path.exists(self.persist_path):
+            return
+        try:
+            with open(self.persist_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            self.documents = list(payload.get("documents", []))
+            self.recommendations = list(payload.get("recommendations", []))
+            self._rebuild_index()
+        except Exception:
+            # Corrupt state should not crash runtime; start fresh.
+            self.documents = []
+            self.recommendations = []
+            self.bm25 = None
 
     def _tokenize(self, text: str) -> List[str]:
         """Tokenize text for BM25 indexing.
@@ -53,6 +92,7 @@ class FinancialSituationMemory:
 
         # Rebuild BM25 index with new documents
         self._rebuild_index()
+        self._save_to_disk()
 
     def get_memories(self, current_situation: str, n_matches: int = 1) -> List[dict]:
         """Find matching recommendations using BM25 similarity.
@@ -96,6 +136,55 @@ class FinancialSituationMemory:
         self.documents = []
         self.recommendations = []
         self.bm25 = None
+        self._save_to_disk()
+
+    def load_from_obsidian(self, vault_path: str) -> str:
+        """Load markdown notes into memory (works with any markdown folder)."""
+        if not os.path.exists(vault_path):
+            return f"Error: path not found: {vault_path}"
+
+        md_files = glob.glob(os.path.join(vault_path, "**/*.md"), recursive=True)
+        pairs: List[Tuple[str, str]] = []
+        for file_path in md_files:
+            # skip hidden directories/files
+            if "/." in file_path or "\\." in file_path:
+                continue
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                if not content:
+                    continue
+                title = os.path.basename(file_path)
+                situation = f"Note Title: {title}\nContext: {content[:300]}"
+                pairs.append((situation, content))
+            except Exception:
+                continue
+
+        if not pairs:
+            return "No markdown files found."
+
+        self.add_situations(pairs)
+        return f"Successfully loaded {len(pairs)} markdown notes."
+
+    def save_to_obsidian(
+        self,
+        content: str,
+        filename: str,
+        vault_path: str,
+        folder: str = "TradingAgents/Reports",
+    ):
+        """Save a report into an Obsidian-compatible markdown folder."""
+        if not os.path.exists(vault_path):
+            return False, f"Path not found: {vault_path}"
+        out_dir = os.path.join(vault_path, folder)
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, filename)
+        try:
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            return True, f"Saved to {out_path}"
+        except Exception as e:
+            return False, f"Failed to save: {e}"
 
 
 if __name__ == "__main__":

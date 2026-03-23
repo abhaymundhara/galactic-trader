@@ -50,6 +50,7 @@ Debate History:
             "bull_history": investment_debate_state.get("bull_history", ""),
             "current_response": response.content,
             "count": investment_debate_state["count"],
+            "verified_urls": investment_debate_state.get("verified_urls", []),
         }
 
         return {

@@ -95,6 +95,7 @@ class GraphSetup:
         research_manager_node = create_research_manager(
             self.deep_thinking_llm, self.invest_judge_memory
         )
+        fact_checker_node = create_fact_checker(self.quick_thinking_llm)
         trader_node = create_trader(self.quick_thinking_llm, self.trader_memory)
 
         # Create risk analysis nodes
@@ -120,6 +121,8 @@ class GraphSetup:
         workflow.add_node("Bull Researcher", bull_researcher_node)
         workflow.add_node("Bear Researcher", bear_researcher_node)
         workflow.add_node("Research Manager", research_manager_node)
+        if self.conditional_logic.enable_fact_checker:
+            workflow.add_node("Fact Checker", fact_checker_node)
         workflow.add_node("Trader", trader_node)
         workflow.add_node("Aggressive Analyst", aggressive_analyst)
         workflow.add_node("Neutral Analyst", neutral_analyst)
@@ -153,22 +156,30 @@ class GraphSetup:
                 workflow.add_edge(current_clear, "Bull Researcher")
 
         # Add remaining edges
+        bull_routes = {
+            "Bear Researcher": "Bear Researcher",
+            "Research Manager": "Research Manager",
+        }
+        bear_routes = {
+            "Bull Researcher": "Bull Researcher",
+            "Research Manager": "Research Manager",
+        }
+        if self.conditional_logic.enable_fact_checker:
+            bull_routes["Fact Checker"] = "Fact Checker"
+            bear_routes["Fact Checker"] = "Fact Checker"
+
         workflow.add_conditional_edges(
             "Bull Researcher",
             self.conditional_logic.should_continue_debate,
-            {
-                "Bear Researcher": "Bear Researcher",
-                "Research Manager": "Research Manager",
-            },
+            bull_routes,
         )
         workflow.add_conditional_edges(
             "Bear Researcher",
             self.conditional_logic.should_continue_debate,
-            {
-                "Bull Researcher": "Bull Researcher",
-                "Research Manager": "Research Manager",
-            },
+            bear_routes,
         )
+        if self.conditional_logic.enable_fact_checker:
+            workflow.add_edge("Fact Checker", "Research Manager")
         workflow.add_edge("Research Manager", "Trader")
         workflow.add_edge("Trader", "Aggressive Analyst")
         workflow.add_conditional_edges(

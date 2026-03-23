@@ -31,6 +31,7 @@ class Propagator:
                     "current_response": "",
                     "judge_decision": "",
                     "count": 0,
+                    "verified_urls": [],
                 }
             ),
             "risk_debate_state": RiskDebateState(

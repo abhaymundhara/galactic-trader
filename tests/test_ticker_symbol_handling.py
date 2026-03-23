@@ -13,6 +13,10 @@ class TickerSymbolHandlingTests(unittest.TestCase):
         self.assertIn("7203.T", context)
         self.assertIn("exchange suffix", context)
 
+    def test_normalize_korean_ticker_to_krx_format(self):
+        self.assertEqual(normalize_ticker_symbol("005930.ks"), "KRX:005930")
+        self.assertEqual(normalize_ticker_symbol("035720.KQ"), "KRX:035720")
+
 
 if __name__ == "__main__":
     unittest.main()

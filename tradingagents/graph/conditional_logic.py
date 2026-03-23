@@ -6,10 +6,11 @@ from tradingagents.agents.utils.agent_states import AgentState
 class ConditionalLogic:
     """Handles conditional logic for determining graph flow."""
 
-    def __init__(self, max_debate_rounds=1, max_risk_discuss_rounds=1):
+    def __init__(self, max_debate_rounds=1, max_risk_discuss_rounds=1, enable_fact_checker=False):
         """Initialize with configuration parameters."""
         self.max_debate_rounds = max_debate_rounds
         self.max_risk_discuss_rounds = max_risk_discuss_rounds
+        self.enable_fact_checker = enable_fact_checker
 
     def should_continue_market(self, state: AgentState):
         """Determine if market analysis should continue."""
@@ -49,7 +50,7 @@ class ConditionalLogic:
         if (
             state["investment_debate_state"]["count"] >= 2 * self.max_debate_rounds
         ):  # 3 rounds of back-and-forth between 2 agents
-            return "Research Manager"
+            return "Fact Checker" if self.enable_fact_checker else "Research Manager"
         if state["investment_debate_state"]["current_response"].startswith("Bull"):
             return "Bear Researcher"
         return "Bull Researcher"

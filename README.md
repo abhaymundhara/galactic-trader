@@ -235,6 +235,29 @@ Dry-run a short test loop (2 cycles):
 python scripts/run_gold_live_session.py --max-cycles 2
 ```
 
+### Dashboard + Scheduler (Fork Feature Parity)
+
+This branch also includes the key features from `TradingAgents-Dashboard`:
+
+- `app.py`: Streamlit dashboard for manual analysis
+- `scheduler_service.py`: background APScheduler service with persistent jobs (`jobs.sqlite`)
+- `run_scheduler.py`: standalone scheduler daemon process
+- Smart ticker search + Korean ticker conversion (`.KS/.KQ -> KRX:XXXXXX`)
+- Persistent markdown memory import/export helpers (`FinancialSituationMemory`)
+
+Run dashboard:
+
+```bash
+streamlit run app.py
+```
+
+Run scheduler daemon:
+
+```bash
+python run_scheduler.py
+python run_scheduler.py stop
+```
+
 ## Contributing
 
 We welcome contributions from the community! Whether it's fixing a bug, improving documentation, or suggesting a new feature, your input helps make this project better. If you are interested in this line of research, please consider joining our open-source financial AI research community [Tauric Research](https://tauric.ai/).
