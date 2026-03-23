@@ -200,6 +200,41 @@ print(decision)
 
 See `tradingagents/default_config.py` for all configuration options.
 
+### Overlay Extension (Gold + Paper Trading)
+
+If you want to build strategy-specific logic without getting blocked by upstream churn, keep custom code in an overlay instead of editing `tradingagents/*` directly.
+
+This repo now includes:
+
+- `extensions/gold_paper/`: gold-focused analysis runner built on `TradingAgentsGraph`
+- `scripts/configure_remotes.sh`: sets `origin` to your fork and `upstream` to TauricResearch
+- `scripts/sync_upstream.sh`: guarded upstream sync with rollback branch creation
+- `docs/overlay-upstream-workflow.md`: recommended branch and sync workflow
+
+Quick start:
+
+```bash
+python scripts/smoke_overlay.py
+```
+
+Then run a gold analysis overlay script:
+
+```bash
+python -m extensions.gold_paper.runner
+```
+
+Run a continuous London -> New York paper session on 15m intervals:
+
+```bash
+python scripts/run_gold_live_session.py --symbol XAUUSD --price-symbol GC=F --equity 100000 --risk-pct 0.5
+```
+
+Dry-run a short test loop (2 cycles):
+
+```bash
+python scripts/run_gold_live_session.py --max-cycles 2
+```
+
 ## Contributing
 
 We welcome contributions from the community! Whether it's fixing a bug, improving documentation, or suggesting a new feature, your input helps make this project better. If you are interested in this line of research, please consider joining our open-source financial AI research community [Tauric Research](https://tauric.ai/).
